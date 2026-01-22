@@ -1520,12 +1520,38 @@ if Star is not None:
                     yield event.plain_result("Pixiv 登录失败或未登录，无法搜索。")
                     return
 
+                search_kwargs = {}
+                try:
+                    import inspect
+
+                    params = inspect.signature(client.search_illusts).parameters
+                    if "search_target" in params:
+                        search_kwargs["search_target"] = "partial_match_for_tags"
+                    if "sort" in params:
+                        search_kwargs["sort"] = "date_desc"
+                except Exception:
+                    pass
+
                 illusts = await client.search_illusts(
                     tags=[raw_query],
                     bookmark_threshold=bookmark_threshold,
                     date_range_days=date_range_days,
                     limit=limit,
+                    **search_kwargs,
                 )
+                if not illusts and date_range_days > 0:
+                    fallback_kwargs = {}
+                    if "search_target" in search_kwargs:
+                        fallback_kwargs["search_target"] = "title_and_caption"
+                    if "sort" in search_kwargs:
+                        fallback_kwargs["sort"] = "date_desc"
+                    illusts = await client.search_illusts(
+                        tags=[raw_query],
+                        bookmark_threshold=bookmark_threshold,
+                        date_range_days=0,
+                        limit=limit,
+                        **fallback_kwargs,
+                    )
                 if not illusts:
                     yield event.plain_result("未找到符合条件的作品。")
                     return

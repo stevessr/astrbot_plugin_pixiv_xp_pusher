@@ -221,6 +221,8 @@ class PixivClient:
         bookmark_threshold: int = 0,
         date_range_days: int = 30,  # 默认扩大到 30 天，增加命中率
         limit: int = 50,
+        search_target: str = "partial_match_for_tags",
+        sort: str = "popular_desc",
     ) -> list[Illust]:
         """
         搜索作品
@@ -230,6 +232,8 @@ class PixivClient:
             bookmark_threshold: 收藏数阈值
             date_range_days: 日期范围
             limit: 返回数量
+            search_target: 搜索目标
+            sort: 排序方式
         """
         if not self._logged_in:
             logger.warning("搜索功能需要登录")
@@ -243,23 +247,25 @@ class PixivClient:
         total_fetched = 0
         filtered_count = 0
 
+        start_date = None
+        if date_range_days > 0:
+            start_date = (datetime.now() - timedelta(days=date_range_days)).strftime(
+                "%Y-%m-%d"
+            )
+
         while len(illusts) < limit:
             async with self.rate_limiter:
                 if next_qs:
                     result = await self.api.search_illust(**next_qs)
                 else:
-                    # 动态计算日期范围
-                    if date_range_days > 0:
-                        start_date = (
-                            datetime.now() - timedelta(days=date_range_days)
-                        ).strftime("%Y-%m-%d")
-
-                    result = await self.api.search_illust(
-                        word=query,
-                        search_target="partial_match_for_tags",
-                        sort="popular_desc",
-                        start_date=start_date,
-                    )
+                    params = {
+                        "word": query,
+                        "search_target": search_target,
+                        "sort": sort,
+                    }
+                    if start_date:
+                        params["start_date"] = start_date
+                    result = await self.api.search_illust(**params)
 
             if not result.get("illusts"):
                 break
@@ -281,7 +287,14 @@ class PixivClient:
                 break
 
         logger.info(
-            f"搜索 '{query}' (近{date_range_days}天): 获取 {total_fetched} -> 过滤 {filtered_count} -> 保留 {len(illusts)}"
+            "搜索 '%s' (近%s天, target=%s, sort=%s): 获取 %s -> 过滤 %s -> 保留 %s",
+            query,
+            date_range_days,
+            search_target,
+            sort,
+            total_fetched,
+            filtered_count,
+            len(illusts),
         )
         return illusts
 
