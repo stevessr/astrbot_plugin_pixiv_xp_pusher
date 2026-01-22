@@ -10,13 +10,10 @@ Prompt 设计参考：
 - 让 LLM 输出喜爱概率分数
 """
 
-import asyncio
 import json
-import logging
 from dataclasses import dataclass
-from typing import Optional
 
-logger = logging.getLogger(__name__)
+from astrbot.api import logger
 
 # 尝试导入 OpenAI 客户端
 try:

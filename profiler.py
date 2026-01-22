@@ -6,12 +6,10 @@ XP 画像构建模块
 import asyncio
 import itertools
 import json
-import logging
 import math
 import re
 from collections import Counter, defaultdict
 from datetime import datetime
-from typing import Optional
 
 try:
     from openai import AsyncOpenAI
@@ -24,8 +22,7 @@ import database as db
 from pixiv_client import Illust, PixivClient
 from utils import retry_async
 
-logger = logging.getLogger(__name__)
-
+from astrbot.api import logger
 
 # 常见别名映射表（可扩展）
 TAG_ALIASES = {
@@ -266,7 +263,7 @@ class AITagProcessor:
                 # 简化报错日志
                 error_msg = str(e)
                 if "524" in error_msg:
-                    logger.warning(f"AI API 超时 (524)")
+                    logger.warning("AI API 超时 (524)")
                 else:
                     logger.warning(f"AI 处理批次失败 (尝试 {attempt + 1}): {e}")
 
@@ -369,10 +366,10 @@ class XPProfiler:
     def __init__(
         self,
         client: PixivClient,
-        stop_words: Optional[list[str]] = None,
+        stop_words: list[str] | None = None,
         discovery_rate: float = 0.1,
         time_decay_days: int = 180,
-        ai_config: Optional[dict] = None,
+        ai_config: dict | None = None,
         saturation_threshold: float = 0.5,
         ai_provider=None,
     ):

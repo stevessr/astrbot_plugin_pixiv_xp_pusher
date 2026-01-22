@@ -4,16 +4,14 @@
 """
 
 import asyncio
-import logging
 import random
 from datetime import datetime, timedelta
-from typing import Optional
 
 import database as db
 from pixiv_client import Illust, PixivClient
 from utils import expand_search_query
 
-logger = logging.getLogger(__name__)
+from astrbot.api import logger
 
 
 class ContentFetcher:
@@ -24,12 +22,12 @@ class ContentFetcher:
         client: PixivClient,
         bookmark_threshold: dict[str, int] = None,
         date_range_days: int = 7,
-        subscribed_artists: Optional[list[int]] = None,
+        subscribed_artists: list[int] | None = None,
         discovery_rate: float = 0.1,
-        ranking_config: Optional[dict] = None,
-        mab_limits: Optional[dict] = None,
+        ranking_config: dict | None = None,
+        mab_limits: dict | None = None,
         sync_client: PixivClient = None,
-        dynamic_threshold_config: Optional[dict] = None,  # 动态阈值配置
+        dynamic_threshold_config: dict | None = None,  # 动态阈值配置
         search_limit: int = 50,  # 默认搜索数量
     ):
         self.client = client  # 主客户端 (搜索、排行榜)

@@ -5,9 +5,10 @@ SQLite 数据层
 import json
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Optional
 
 import aiosqlite
+
+from astrbot.api import logger
 
 DB_PATH = Path(__file__).parent / "data" / "pixiv_xp.db"
 
@@ -237,10 +238,6 @@ async def cleanup_old_records(days: int = 180):
     Args:
         days: 保留最近多少天的记录 (默认 180 天)
     """
-    import logging
-
-    logger = logging.getLogger(__name__)
-
     cutoff_date = datetime.now() - timedelta(days=days)
     cutoff_str = cutoff_date.strftime("%Y-%m-%d %H:%M:%S")
 
@@ -380,7 +377,7 @@ async def mark_pushed(illust_id: int, source: str):
         await db.commit()
 
 
-async def get_push_source(illust_id: int) -> Optional[str]:
+async def get_push_source(illust_id: int) -> str | None:
     """获取推送来源"""
     async with aiosqlite.connect(DB_PATH) as db:
         async with db.execute(
@@ -1227,7 +1224,7 @@ async def get_recent_engagement_sequence(limit: int = 50) -> list[tuple[int, str
 
 
 # ============ Embedding 缓存 ============
-async def get_illust_embedding(illust_id: int) -> Optional[list[float]]:
+async def get_illust_embedding(illust_id: int) -> list[float] | None:
     """获取作品的缓存 Embedding"""
     async with aiosqlite.connect(DB_PATH) as db:
         cursor = await db.execute(
@@ -1290,7 +1287,7 @@ async def save_illust_embeddings_batch(items: list[tuple[int, list[float], str]]
         await db.commit()
 
 
-async def get_user_embedding(user_id: int) -> Optional[tuple[list[float], str]]:
+async def get_user_embedding(user_id: int) -> tuple[list[float], str] | None:
     """
     获取用户画像 Embedding
 

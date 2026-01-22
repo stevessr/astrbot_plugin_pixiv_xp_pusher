@@ -3,13 +3,11 @@
 去重、黑名单、质量过滤、匹配度评分
 """
 
-import logging
-from typing import Optional
 
 import database as db
 from pixiv_client import Illust
 
-logger = logging.getLogger(__name__)
+from astrbot.api import logger
 
 
 def calculate_match_score(
@@ -103,19 +101,19 @@ class ContentFilter:
 
     def __init__(
         self,
-        blacklist_tags: Optional[list[str]] = None,
+        blacklist_tags: list[str] | None = None,
         daily_limit: int = 20,
         exclude_ai: bool = True,
         min_match_score: float = 0.0,
         match_weight: float = 0.5,
         max_per_artist: int = 3,
-        subscribed_artists: Optional[list[int]] = None,  # 关注的画师 ID
+        subscribed_artists: list[int] | None = None,  # 关注的画师 ID
         artist_boost: float = 0.3,  # 关注画师的匹配度加成
         min_create_days: int = 0,  # 过滤 N 天前的老图 (0=不过滤)
         r18_mode: bool = False,  # 涩涩模式：只推送 R-18
         # === 新增：借鉴 X 算法的增强选项 ===
-        author_diversity: Optional[dict] = None,  # 画师多样性衰减配置
-        source_boost: Optional[dict] = None,  # 来源加成配置
+        author_diversity: dict | None = None,  # 画师多样性衰减配置
+        source_boost: dict | None = None,  # 来源加成配置
         embedder=None,  # 可选的 Embedder 实例 (用于语义匹配)
         ai_scorer=None,  # 可选的 AIScorer 实例 (用于 LLM 精排)
         # 多样性增强
@@ -164,7 +162,7 @@ class ContentFilter:
     async def filter(
         self,
         illusts: list[Illust],
-        xp_profile: Optional[dict[str, float]] = None,
+        xp_profile: dict[str, float] | None = None,
         user_id: int = 0,  # 用于 Embedding 缓存
     ) -> list[Illust]:
         """

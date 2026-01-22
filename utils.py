@@ -9,17 +9,17 @@
 
 import asyncio
 import io
-import logging
 import os
 import random
 import tempfile
 import time
 import zipfile
 from functools import wraps
-from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
 import aiohttp
+
+from astrbot.api import logger
 
 TAG_TRANSLATIONS = {
     # Visual Traits
@@ -82,43 +82,8 @@ def expand_search_query(tag: str) -> str:
 
 
 def setup_logging(log_dir: Path = Path("logs")):
-    """配置日志（分级、文件轮转）"""
-    log_dir.mkdir(exist_ok=True)
-
-    formatter = logging.Formatter(
-        "[%(asctime)s] %(levelname)s %(name)s: %(message)s", datefmt="%Y-%m-%d %H:%M:%S"
-    )
-
-    # 文件 Handler（轮转，最大 5MB，保留 3 份）
-    file_handler = RotatingFileHandler(
-        log_dir / "pixiv_xp.log",
-        maxBytes=5 * 1024 * 1024,
-        backupCount=3,
-        encoding="utf-8",
-    )
-    file_handler.setFormatter(formatter)
-    file_handler.setLevel(logging.DEBUG)
-
-    # 控制台 Handler
-    console_handler = logging.StreamHandler()
-    console_handler.setFormatter(formatter)
-    console_handler.setLevel(logging.INFO)
-
-    # 根 Logger
-    root_logger = logging.getLogger()
-    root_logger.setLevel(logging.INFO)
-    root_logger.addHandler(file_handler)
-    root_logger.addHandler(console_handler)
-
-    # 屏蔽第三方库的废话
-    logging.getLogger("aiosqlite").setLevel(logging.WARNING)
-    logging.getLogger("urllib3").setLevel(logging.WARNING)
-    logging.getLogger("asyncio").setLevel(logging.WARNING)
-    logging.getLogger("httpx").setLevel(logging.WARNING)
-    logging.getLogger("httpcore").setLevel(logging.WARNING)
-    logging.getLogger("pixivpy_async").setLevel(logging.ERROR)  # 屏蔽重试警告
-
-    return root_logger
+    """使用 AstrBot 的全局日志配置"""
+    return logger
 
 
 class AsyncRateLimiter:
@@ -185,7 +150,7 @@ def retry_async(max_retries: int = 3, delay: float = 1.0, backoff: float = 2.0):
                 except Exception as e:
                     last_exception = e
                     if attempt < max_retries:
-                        logging.warning(
+                        logger.warning(
                             f"{func.__name__} 失败 (尝试 {attempt + 1}/{max_retries + 1}): {e}"
                         )
                         await asyncio.sleep(current_delay)
@@ -362,9 +327,10 @@ def convert_ugoira_to_gif(
     zip_data: bytes, frames: list[dict], max_width: int = 720
 ) -> bytes:
     """将 Ugoira ZIP 转换为 GIF (使用 Pillow，不依赖 ffmpeg)"""
-    from PIL import Image
     import io
     import zipfile
+
+    from PIL import Image
 
     try:
         with zipfile.ZipFile(io.BytesIO(zip_data)) as zf:
@@ -402,5 +368,5 @@ def convert_ugoira_to_gif(
             return output.getvalue()
 
     except Exception as e:
-        logging.error(f"GIF 转换失败：{e}")
+        logger.error(f"GIF 转换失败：{e}")
         return None

@@ -10,12 +10,10 @@ AI Embedding 模块
 """
 
 import asyncio
-import logging
 import math
 from dataclasses import dataclass
-from typing import Optional
 
-logger = logging.getLogger(__name__)
+from astrbot.api import logger
 
 # 尝试导入 OpenAI 客户端
 try:
@@ -129,7 +127,7 @@ class Embedder:
             logger.error(f"不支持的 Embedding Provider: {self.provider}")
             self.enabled = False
 
-    async def embed_text(self, text: str) -> Optional[list[float]]:
+    async def embed_text(self, text: str) -> list[float] | None:
         """
         计算单个文本的 Embedding
 
@@ -168,8 +166,8 @@ class Embedder:
             return None
 
     async def embed_tags(
-        self, tags: list[str], weights: Optional[list[float]] = None
-    ) -> Optional[list[float]]:
+        self, tags: list[str], weights: list[float] | None = None
+    ) -> list[float] | None:
         """
         将标签列表转换为 Embedding
 
@@ -195,7 +193,7 @@ class Embedder:
 
         return await self.embed_text(text)
 
-    async def embed_batch(self, texts: list[str]) -> list[Optional[list[float]]]:
+    async def embed_batch(self, texts: list[str]) -> list[list[float] | None]:
         """
         批量计算 Embedding
 

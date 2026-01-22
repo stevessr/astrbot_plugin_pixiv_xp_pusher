@@ -1,5 +1,4 @@
 import asyncio
-import logging
 import os
 import sys
 from pathlib import Path
@@ -17,7 +16,7 @@ from pixiv_client import PixivClient
 from profiler import XPProfiler
 from utils import get_pixiv_cat_url, setup_logging
 
-logger = logging.getLogger(__name__)
+from astrbot.api import logger
 
 try:
     from astrbot.api import AstrBotConfig
@@ -446,7 +445,7 @@ async def daily_report_task(config: dict, notifiers: list, profiler=None):
 
     # ========== 1. 生成日报 (Top Tags + MAB Stats) ==========
     try:
-        from database import get_top_xp_tags, get_all_strategy_stats
+        from database import get_all_strategy_stats, get_top_xp_tags
 
         top_tags = await get_top_xp_tags(10)
         stats = await get_all_strategy_stats()
@@ -511,7 +510,7 @@ async def daily_report_task(config: dict, notifiers: list, profiler=None):
                         f"AI 清洗完成：{len(valid_tags)}/{len(uncached_tags)} 有效"
                     )
                 else:
-                    maintenance_summary.append(f"⚠️ AI 清洗失败 (已重试)")
+                    maintenance_summary.append("⚠️ AI 清洗失败 (已重试)")
         except Exception as e:
             logger.error(f"AI 清洗失败：{e}")
             maintenance_summary.append(f"⚠️ AI 清洗失败：{e}")

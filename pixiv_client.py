@@ -4,18 +4,14 @@ Pixiv API 异步客户端
 """
 
 import asyncio
-import logging
-import random
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import Optional
-from urllib.parse import parse_qs, urlparse
 
 import aiohttp
 from pixivpy_async import AppPixivAPI
 from utils import AsyncRateLimiter, download_image_with_referer, retry_async
 
-logger = logging.getLogger(__name__)
+from astrbot.api import logger
 
 
 @dataclass
@@ -43,11 +39,11 @@ class PixivClient:
 
     def __init__(
         self,
-        refresh_token: Optional[str] = None,
+        refresh_token: str | None = None,
         requests_per_minute: int = 60,
         random_delay: tuple[float, float] = (1.0, 3.0),
         max_concurrency: int = 5,
-        proxy_url: Optional[str] = None,
+        proxy_url: str | None = None,
     ):
         self.refresh_token = refresh_token
 
@@ -69,7 +65,7 @@ class PixivClient:
         self.api = AppPixivAPI(proxy=proxy_url)
         self.rate_limiter = AsyncRateLimiter(requests_per_minute, random_delay)
         self.download_semaphore = asyncio.Semaphore(max_concurrency)
-        self._session: Optional[aiohttp.ClientSession] = None
+        self._session: aiohttp.ClientSession | None = None
         self._logged_in = False
         self.proxy_url = proxy_url
 
@@ -106,10 +102,10 @@ class PixivClient:
         user_id: int,
         limit: int = 500,
         private: bool = False,
-        stop_ids: Optional[set[int]] = None,
-        skip_ids: Optional[set[int]] = None,
-        on_batch: Optional[callable] = None,
-        start_url: Optional[str] = None,
+        stop_ids: set[int] | None = None,
+        skip_ids: set[int] | None = None,
+        on_batch: callable | None = None,
+        start_url: str | None = None,
     ) -> list[Illust]:
         """
         获取用户收藏
@@ -289,7 +285,7 @@ class PixivClient:
 
     @retry_async(max_retries=3)
     async def get_user_illusts(
-        self, user_id: int, since: Optional[datetime] = None, limit: int = 30
+        self, user_id: int, since: datetime | None = None, limit: int = 30
     ) -> list[Illust]:
         """
         获取画师作品
@@ -576,7 +572,7 @@ class PixivClient:
             return await self.api.ugoira_metadata(illust_id)
 
     async def add_bookmark(
-        self, illust_id: int, private: bool = False, tags: Optional[list[str]] = None
+        self, illust_id: int, private: bool = False, tags: list[str] | None = None
     ) -> bool:
         """添加收藏"""
         restrict = "private" if private else "public"
@@ -592,7 +588,7 @@ class PixivClient:
             return False
 
     @retry_async(max_retries=3)
-    async def get_illust_detail(self, illust_id: int) -> Optional[Illust]:
+    async def get_illust_detail(self, illust_id: int) -> Illust | None:
         """获取作品详情"""
         if not self._logged_in:
             logger.warning("获取详情需要登录")
