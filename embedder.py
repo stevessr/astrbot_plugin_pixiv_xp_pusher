@@ -9,6 +9,9 @@ AI Embedding 模块
 - local: 本地 sentence-transformers 模型 (需要额外安装)
 """
 
+from __future__ import annotations
+
+
 import asyncio
 import math
 from dataclasses import dataclass

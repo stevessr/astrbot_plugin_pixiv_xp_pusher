@@ -3,6 +3,9 @@
 去重、黑名单、质量过滤、匹配度评分
 """
 
+from __future__ import annotations
+
+
 
 import database as db
 from pixiv_client import Illust

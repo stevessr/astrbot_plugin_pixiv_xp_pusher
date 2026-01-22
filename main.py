@@ -1,3 +1,4 @@
+from __future__ import annotations
 import asyncio
 import os
 import sys
@@ -962,9 +963,26 @@ if Star is not None:
                 if chat_provider_id:
                     chat_provider = self.context.get_provider_by_id(chat_provider_id)
                     if not chat_provider:
-                        logger.warning(
-                            f"AstrBot: 未找到 LLM Provider ID: {chat_provider_id}"
-                        )
+                        # 允许用“提供商源ID/显示名”前缀匹配
+                        candidates = [
+                            p
+                            for p in self.context.get_all_providers()
+                            if p.meta().id.startswith(f"{chat_provider_id}/")
+                        ]
+                        if len(candidates) == 1:
+                            chat_provider = candidates[0]
+                            logger.info(
+                                f"AstrBot: 已将 LLM Provider ID 解析为 {chat_provider.meta().id}"
+                            )
+                        elif candidates:
+                            logger.warning(
+                                f"AstrBot: LLM Provider ID '{chat_provider_id}' 匹配到多个候选: "
+                                + ", ".join(p.meta().id for p in candidates)
+                            )
+                        else:
+                            logger.warning(
+                                f"AstrBot: 未找到 LLM Provider ID: {chat_provider_id}"
+                            )
                     elif not hasattr(chat_provider, "text_chat"):
                         logger.warning(
                             f"AstrBot: Provider ID {chat_provider_id} 不是可用的 LLM Provider"
@@ -982,9 +1000,26 @@ if Star is not None:
                         embedding_provider_id
                     )
                     if not embedding_provider:
-                        logger.warning(
-                            f"AstrBot: 未找到 Embedding Provider ID: {embedding_provider_id}"
-                        )
+                        candidates = [
+                            p
+                            for p in self.context.get_all_embedding_providers()
+                            if p.meta().id.startswith(f"{embedding_provider_id}/")
+                        ]
+                        if len(candidates) == 1:
+                            embedding_provider = candidates[0]
+                            logger.info(
+                                "AstrBot: 已将 Embedding Provider ID 解析为 "
+                                f"{embedding_provider.meta().id}"
+                            )
+                        elif candidates:
+                            logger.warning(
+                                f"AstrBot: Embedding Provider ID '{embedding_provider_id}' 匹配到多个候选: "
+                                + ", ".join(p.meta().id for p in candidates)
+                            )
+                        else:
+                            logger.warning(
+                                f"AstrBot: 未找到 Embedding Provider ID: {embedding_provider_id}"
+                            )
                     elif not hasattr(embedding_provider, "get_embedding"):
                         logger.warning(
                             f"AstrBot: Provider ID {embedding_provider_id} 不是可用的 Embedding Provider"

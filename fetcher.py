@@ -3,6 +3,9 @@
 双策略：XP 搜索 + 画师订阅 + 排行榜
 """
 
+from __future__ import annotations
+
+
 import asyncio
 import random
 from datetime import datetime, timedelta

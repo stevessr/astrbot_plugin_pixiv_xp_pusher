@@ -2,6 +2,9 @@
 SQLite 数据层
 """
 
+from __future__ import annotations
+
+
 import json
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -35,22 +38,6 @@ async def init_db():
         except Exception:
             # 旧表只有 tags，删除重建
             await db.execute("DROP TABLE IF EXISTS illust_cache")
-            await db.commit()
-
-        # 检查 illust_cache 表是否包含 chain_depth 列 (v3 新增 - 连锁深度)
-        try:
-            await db.execute("SELECT chain_depth FROM illust_cache LIMIT 0")
-        except Exception:
-            # 添加新列 (不重建表以保留数据)
-            await db.execute(
-                "ALTER TABLE illust_cache ADD COLUMN chain_depth INTEGER DEFAULT 0"
-            )
-            await db.execute(
-                "ALTER TABLE illust_cache ADD COLUMN chain_parent_id INTEGER DEFAULT NULL"
-            )
-            await db.execute(
-                "ALTER TABLE illust_cache ADD COLUMN chain_msg_id INTEGER DEFAULT NULL"
-            )
             await db.commit()
 
         await db.executescript("""
@@ -102,6 +89,10 @@ async def init_db():
                 tags TEXT,  -- JSON 数组
                 user_id INTEGER,      -- 画师 ID
                 user_name TEXT,       -- 画师名
+                source TEXT DEFAULT 'xp_search',
+                chain_depth INTEGER DEFAULT 0,
+                chain_parent_id INTEGER DEFAULT NULL,
+                chain_msg_id INTEGER DEFAULT NULL,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
 
@@ -208,27 +199,33 @@ async def init_db():
         await db.commit()
 
         # === 迁移：为 illust_cache 添加 source 和 chain 列 ===
-        try:
-            await db.execute(
-                "ALTER TABLE illust_cache ADD COLUMN source TEXT DEFAULT 'xp_search'"
-            )
-            await db.commit()
-            logger.info("迁移：illust_cache 添加 source 列")
-        except Exception:
-            pass  # 列已存在
+        cursor = await db.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='illust_cache'"
+        )
+        if await cursor.fetchone():
+            try:
+                await db.execute(
+                    "ALTER TABLE illust_cache ADD COLUMN source TEXT DEFAULT 'xp_search'"
+                )
+                await db.commit()
+                logger.info("迁移：illust_cache 添加 source 列")
+            except Exception:
+                pass  # 列已存在
 
-        try:
-            await db.execute(
-                "ALTER TABLE illust_cache ADD COLUMN chain_depth INTEGER DEFAULT 0"
-            )
-            await db.execute(
-                "ALTER TABLE illust_cache ADD COLUMN chain_parent_id INTEGER"
-            )
-            await db.execute("ALTER TABLE illust_cache ADD COLUMN chain_msg_id INTEGER")
-            await db.commit()
-            logger.info("迁移：illust_cache 添加 chain 列")
-        except Exception:
-            pass  # 列已存在
+            try:
+                await db.execute(
+                    "ALTER TABLE illust_cache ADD COLUMN chain_depth INTEGER DEFAULT 0"
+                )
+                await db.execute(
+                    "ALTER TABLE illust_cache ADD COLUMN chain_parent_id INTEGER"
+                )
+                await db.execute(
+                    "ALTER TABLE illust_cache ADD COLUMN chain_msg_id INTEGER"
+                )
+                await db.commit()
+                logger.info("迁移：illust_cache 添加 chain 列")
+            except Exception:
+                pass  # 列已存在
 
 
 async def cleanup_old_records(days: int = 180):

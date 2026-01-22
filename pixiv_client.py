@@ -3,6 +3,9 @@ Pixiv API 异步客户端
 基于 pixivpy-async
 """
 
+from __future__ import annotations
+
+
 import asyncio
 from dataclasses import dataclass
 from datetime import datetime, timedelta

@@ -3,6 +3,9 @@ XP 画像构建模块
 分析收藏 Tag，构建用户 XP 权重
 """
 
+from __future__ import annotations
+
+
 import asyncio
 import itertools
 import json

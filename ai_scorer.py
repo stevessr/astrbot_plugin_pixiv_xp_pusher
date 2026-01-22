@@ -10,6 +10,9 @@ Prompt 设计参考：
 - 让 LLM 输出喜爱概率分数
 """
 
+from __future__ import annotations
+
+
 import json
 from dataclasses import dataclass
 
