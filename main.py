@@ -1,22 +1,21 @@
-
 import asyncio
 import logging
 import os
 import sys
 from pathlib import Path
+
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 
 # Ensure project root in path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from database import init_db, cache_illust, get_cached_illust_tags, get_cached_illust, mark_pushed
-from pixiv_client import PixivClient
-from profiler import XPProfiler
+from database import cache_illust, init_db, mark_pushed
 from fetcher import ContentFetcher
 from filter import ContentFilter
-from utils import get_pixiv_cat_url
-from utils import setup_logging
+from pixiv_client import PixivClient
+from profiler import XPProfiler
+from utils import get_pixiv_cat_url, setup_logging
 
 logger = logging.getLogger(__name__)
 
@@ -33,74 +32,87 @@ except Exception:  # pragma: no cover - allow standalone CLI usage
     filter = None
 
 
-async def retry_async(coro_func, *args, max_retries: int = 3, delay: float = 5.0, backoff: float = 2.0, **kwargs):
+async def retry_async(
+    coro_func,
+    *args,
+    max_retries: int = 3,
+    delay: float = 5.0,
+    backoff: float = 2.0,
+    **kwargs,
+):
     """
     通用异步重试函数
-    
+
     Args:
         coro_func: 要执行的异步函数
         max_retries: 最大重试次数
         delay: 初始延迟秒数
         backoff: 延迟倍增系数
-    
+
     Returns:
         函数返回值，或在所有重试失败后返回 None
     """
     last_error = None
     current_delay = delay
-    
+
     for attempt in range(max_retries + 1):
         try:
             return await coro_func(*args, **kwargs)
         except Exception as e:
             last_error = e
             if attempt < max_retries:
-                logger.warning(f"操作失败 (尝试 {attempt + 1}/{max_retries + 1}): {e}，{current_delay:.1f}s 后重试...")
+                logger.warning(
+                    f"操作失败 (尝试 {attempt + 1}/{max_retries + 1}): {e}，{current_delay:.1f}s 后重试..."
+                )
                 await asyncio.sleep(current_delay)
                 current_delay *= backoff
             else:
                 logger.error(f"操作最终失败 (已重试 {max_retries} 次): {e}")
-    
+
     return None
 
 
 # 全局运行锁，防止任务并发
 _task_lock = asyncio.Lock()
 
-async def setup_notifiers(config: dict, client: PixivClient, profiler: XPProfiler, sync_client: PixivClient = None):
-    raise RuntimeError("Non-AstrBot notifiers have been removed; use notifiers_factory.")
+
+async def setup_notifiers(
+    config: dict,
+    client: PixivClient,
+    profiler: XPProfiler,
+    sync_client: PixivClient = None,
+):
+    raise RuntimeError(
+        "Non-AstrBot notifiers have been removed; use notifiers_factory."
+    )
 
 
 async def setup_services(config: dict, notifiers_factory=None):
     """初始化全局服务 (DB, Client, Profiler, Notifiers)"""
     await init_db()
-    
+
     # 公共网络配置
     network_cfg = config.get("network", {})
     pixiv_cfg = config.get("pixiv", {})
     proxy_url = network_cfg.get("proxy_url")
-    
+
     client_kwargs = {
         "requests_per_minute": network_cfg.get("requests_per_minute", 60),
         "random_delay": tuple(network_cfg.get("random_delay", [1.0, 3.0])),
         "max_concurrency": network_cfg.get("max_concurrency", 5),
-        "proxy_url": proxy_url
+        "proxy_url": proxy_url,
     }
-    
+
     # 主客户端 (用于搜索、排行榜等高风险操作)
     main_client = PixivClient(
-        refresh_token=pixiv_cfg.get("refresh_token"),
-        **client_kwargs
+        refresh_token=pixiv_cfg.get("refresh_token"), **client_kwargs
     )
     await main_client.login()
-    
+
     # 同步客户端 (用于获取收藏、关注动态等低风险操作)
     sync_token = pixiv_cfg.get("sync_token")
     if sync_token:
-        sync_client = PixivClient(
-            refresh_token=sync_token,
-            **client_kwargs
-        )
+        sync_client = PixivClient(refresh_token=sync_token, **client_kwargs)
         await sync_client.login()
         logger.info("✅ 已启用同步专用 Token (sync_token)")
     else:
@@ -115,23 +127,29 @@ async def setup_services(config: dict, notifiers_factory=None):
         discovery_rate=profiler_cfg.get("discovery_rate", 0.1),
         time_decay_days=profiler_cfg.get("time_decay_days", 180),
         ai_config=profiler_cfg.get("ai"),
-        saturation_threshold=profiler_cfg.get("saturation_threshold", 0.5)
+        saturation_threshold=profiler_cfg.get("saturation_threshold", 0.5),
     )
-    
+
     # Init Notifiers (使用 main_client 用于下载图片等，sync_client 用于 on_action 回调)
     if notifiers_factory:
         notifiers = await notifiers_factory(config, main_client, profiler, sync_client)
     else:
         notifiers = await setup_notifiers(config, main_client, profiler, sync_client)
-    
+
     # 返回双客户端
     return main_client, sync_client, profiler, notifiers
 
 
-async def main_task(config: dict, client: PixivClient, profiler: XPProfiler, notifiers: list, sync_client: PixivClient = None):
+async def main_task(
+    config: dict,
+    client: PixivClient,
+    profiler: XPProfiler,
+    notifiers: list,
+    sync_client: PixivClient = None,
+):
     """
     执行一次完整的推送任务 (依赖外部服务)
-    
+
     Args:
         client: 主客户端 (用于搜索、排行榜、下载)
         sync_client: 同步客户端 (用于获取关注动态，可选)
@@ -139,36 +157,39 @@ async def main_task(config: dict, client: PixivClient, profiler: XPProfiler, not
     # 如果未传入 sync_client，使用 main_client
     if sync_client is None:
         sync_client = client
-        
+
     if _task_lock.locked():
         logger.info("⏳ 推送任务正在运行中，本次触发已跳过或排队")
-    
+
     async with _task_lock:
         logger.info("=== 开始推送任务 ===")
-    
+
     try:
         # 1. 构建/更新 XP 画像
         profiler_cfg = config.get("profiler", {})
-        
+
         await profiler.build_profile(
             user_id=config["pixiv"]["user_id"],
             scan_limit=profiler_cfg.get("scan_limit", 500),
-            include_private=profiler_cfg.get("include_private", True)
+            include_private=profiler_cfg.get("include_private", True),
         )
-        
+
         top_tags = await profiler.get_top_tags(profiler_cfg.get("top_n", 20))
         logger.info(f"Top XP Tags: {[t[0] for t in top_tags[:10]]}")
-        
-        if config.get("test"): # Test mode skip heavy DB load if possible, but we need it for xp_profile
-             pass
-             
+
+        if config.get(
+            "test"
+        ):  # Test mode skip heavy DB load if possible, but we need it for xp_profile
+            pass
+
         # 获取完整的 XP Profile 用于匹配度计算
         import database as db_module
+
         xp_profile = await db_module.get_xp_profile()
-        
+
         # 2. 获取内容
         fetcher_cfg = config.get("fetcher", {})
-        
+
         # 1.5 获取关注列表（使用 sync_client，低风险操作）
         following_ids = set()
         pixiv_uid = config.get("pixiv", {}).get("user_id", 0)
@@ -176,41 +197,50 @@ async def main_task(config: dict, client: PixivClient, profiler: XPProfiler, not
             try:
                 following_ids = await sync_client.fetch_following(user_id=pixiv_uid)
             except Exception as e:
-                logger.warning(f"获取关注列表失败: {e}")
-        
+                logger.warning(f"获取关注列表失败：{e}")
+
         manual_subs = set(fetcher_cfg.get("subscribed_artists") or [])
         all_subs = list(following_ids | manual_subs)
-        logger.info(f"有效关注画师数: {len(all_subs)} (API获取: {len(following_ids)}, 手动: {len(manual_subs)})")
+        logger.info(
+            f"有效关注画师数：{len(all_subs)} (API 获取：{len(following_ids)}, 手动：{len(manual_subs)})"
+        )
 
         # ContentFetcher: 搜索/排行榜用 client，订阅检查用 sync_client
         fetcher = ContentFetcher(
             client=client,
             sync_client=sync_client,  # 新增：同步客户端
-            bookmark_threshold=fetcher_cfg.get("bookmark_threshold", {"search": 1000, "subscription": 0}),
+            bookmark_threshold=fetcher_cfg.get(
+                "bookmark_threshold", {"search": 1000, "subscription": 0}
+            ),
             date_range_days=fetcher_cfg.get("date_range_days", 7),
             subscribed_artists=list(manual_subs),
             discovery_rate=profiler_cfg.get("discovery_rate", 0.1),
             ranking_config=fetcher_cfg.get("ranking"),
-            dynamic_threshold_config=fetcher_cfg.get("dynamic_threshold"),  # 动态阈值配置
-            search_limit=fetcher_cfg.get("search_limit", 50)  # 搜索数量限制 (默认50)
+            dynamic_threshold_config=fetcher_cfg.get(
+                "dynamic_threshold"
+            ),  # 动态阈值配置
+            search_limit=fetcher_cfg.get("search_limit", 50),  # 搜索数量限制 (默认 50)
         )
-        
+
         # 执行 Discovery (Search + Ranking + Subs)
-        top_tags = await profiler.get_top_tags(profiler_cfg.get("top_n", 20)) # Re-get is cheap
-        
+        top_tags = await profiler.get_top_tags(
+            profiler_cfg.get("top_n", 20)
+        )  # Re-get is cheap
+
         # 执行 Discovery (Search + Ranking + Subs) -> MAB Scheduled
-        top_tags = await profiler.get_top_tags(profiler_cfg.get("top_n", 20)) # Re-get is cheap
-        
+        top_tags = await profiler.get_top_tags(
+            profiler_cfg.get("top_n", 20)
+        )  # Re-get is cheap
+
         all_illusts = await fetcher.fetch_content(
-             xp_tags=top_tags, 
-             total_limit=fetcher_cfg.get("discovery_limit", 200)
+            xp_tags=top_tags, total_limit=fetcher_cfg.get("discovery_limit", 200)
         )
         logger.info(f"共获取 {len(all_illusts)} 个候选作品")
-        
+
         # 3. 过滤
         filter_cfg = config.get("filter", {})
         match_cfg = fetcher_cfg.get("match_score", {})
-        
+
         # 初始化可选的 Embedder (AI 语义匹配)
         embedder = None
         ai_cfg = config.get("ai", {})
@@ -218,41 +248,46 @@ async def main_task(config: dict, client: PixivClient, profiler: XPProfiler, not
         if embedding_cfg.get("enabled", False):
             try:
                 from embedder import Embedder
+
                 embedder = Embedder(embedding_cfg)
                 if embedder.enabled:
                     logger.info(f"已启用 AI 语义匹配 (model={embedder.model})")
             except Exception as e:
-                logger.warning(f"Embedder 初始化失败: {e}")
-        
+                logger.warning(f"Embedder 初始化失败：{e}")
+
         # 初始化可选的 AIScorer (LLM 精排)
         ai_scorer = None
         scorer_cfg = ai_cfg.get("scorer", {})
         if scorer_cfg.get("enabled", False):
             try:
                 from ai_scorer import AIScorer
-                
+
                 # 支持复用 profiler.ai 的 API 配置
                 if scorer_cfg.get("use_profiler_api", True):
                     profiler_ai_cfg = config.get("profiler", {}).get("ai", {})
                     # 合并配置：scorer 优先，缺失的从 profiler.ai 继承
                     merged_cfg = {
                         "enabled": scorer_cfg.get("enabled", False),
-                        "provider": scorer_cfg.get("provider") or profiler_ai_cfg.get("provider", "openai"),
-                        "api_key": scorer_cfg.get("api_key") or profiler_ai_cfg.get("api_key", ""),
-                        "base_url": scorer_cfg.get("base_url") or profiler_ai_cfg.get("base_url", ""),
-                        "model": scorer_cfg.get("model") or profiler_ai_cfg.get("model", "gpt-4o-mini"),
+                        "provider": scorer_cfg.get("provider")
+                        or profiler_ai_cfg.get("provider", "openai"),
+                        "api_key": scorer_cfg.get("api_key")
+                        or profiler_ai_cfg.get("api_key", ""),
+                        "base_url": scorer_cfg.get("base_url")
+                        or profiler_ai_cfg.get("base_url", ""),
+                        "model": scorer_cfg.get("model")
+                        or profiler_ai_cfg.get("model", "gpt-4o-mini"),
                         "max_candidates": scorer_cfg.get("max_candidates", 50),
                         "score_weight": scorer_cfg.get("score_weight", 0.3),
                     }
                     ai_scorer = AIScorer(merged_cfg)
                 else:
                     ai_scorer = AIScorer(scorer_cfg)
-                
+
                 if ai_scorer.enabled:
                     logger.info(f"已启用 AI 精排评分 (model={ai_scorer.model})")
             except Exception as e:
-                logger.warning(f"AIScorer 初始化失败: {e}")
-        
+                logger.warning(f"AIScorer 初始化失败：{e}")
+
         content_filter = ContentFilter(
             blacklist_tags=filter_cfg.get("blacklist_tags"),
             daily_limit=filter_cfg.get("daily_limit", 20),
@@ -271,53 +306,75 @@ async def main_task(config: dict, client: PixivClient, profiler: XPProfiler, not
             ai_scorer=ai_scorer,  # 可选的 LLM 精排
             # 多样性增强
             shuffle_factor=filter_cfg.get("shuffle_factor", 0.0),
-            exploration_ratio=filter_cfg.get("exploration_ratio", 0.0)
+            exploration_ratio=filter_cfg.get("exploration_ratio", 0.0),
         )
-        
+
         pixiv_uid = config.get("pixiv", {}).get("user_id", 0)
-        filtered = await content_filter.filter(all_illusts, xp_profile=xp_profile, user_id=pixiv_uid)
+        filtered = await content_filter.filter(
+            all_illusts, xp_profile=xp_profile, user_id=pixiv_uid
+        )
         logger.info(f"过滤后 {len(filtered)} 个作品")
-        
+
         # 4. 推送
         if notifiers and filtered:
             try:
                 # 缓存作品信息 (包含来源归因)
                 for illust in filtered:
-                    await cache_illust(illust.id, illust.tags, illust.user_id, illust.user_name, source=illust.source)
-                
+                    await cache_illust(
+                        illust.id,
+                        illust.tags,
+                        illust.user_id,
+                        illust.user_name,
+                        source=illust.source,
+                    )
+
                 all_sent_ids = set()
                 for notifier in notifiers:
                     try:
                         sent_ids = await notifier.send(filtered)
                         all_sent_ids.update(sent_ids)
                     except Exception as e:
-                        logger.error(f"推送器 {type(notifier).__name__} 发送失败: {e}")
-                
+                        logger.error(f"推送器 {type(notifier).__name__} 发送失败：{e}")
+
                 if all_sent_ids:
                     # 记录推送历史
                     filtered_map = {ill.id: ill for ill in filtered}
                     for pid in all_sent_ids:
-
                         if pid in filtered_map:
                             illust = filtered_map[pid]
-                            source = getattr(illust, 'source', 'unknown')
+                            source = getattr(illust, "source", "unknown")
                             await mark_pushed(pid, source)
-                            
+
                             # 更新 MAB 策略统计 (Total Count)
-                            if source in ['xp_search', 'subscription', 'ranking', 'related', 'engagement_artists']:
-                                await db_module.update_strategy_stats(source, is_success=False)
-                    
+                            if source in [
+                                "xp_search",
+                                "subscription",
+                                "ranking",
+                                "related",
+                                "engagement_artists",
+                            ]:
+                                await db_module.update_strategy_stats(
+                                    source, is_success=False
+                                )
+
                     # 将消息 ID 写入数据库缓存（用于连锁推送引用）
                     for notifier in notifiers:
-                        if hasattr(notifier, '_message_illust_map'):
-                            for msg_id, illust_id in notifier._message_illust_map.items():
+                        if hasattr(notifier, "_message_illust_map"):
+                            for (
+                                msg_id,
+                                illust_id,
+                            ) in notifier._message_illust_map.items():
                                 if illust_id in all_sent_ids:
-                                    await db_module.set_chain_meta(illust_id, chain_depth=0, chain_msg_id=msg_id)
-                            
-                    logger.info(f"推送完成: {len(all_sent_ids)}/{len(filtered)} 个作品成功")
+                                    await db_module.set_chain_meta(
+                                        illust_id, chain_depth=0, chain_msg_id=msg_id
+                                    )
+
+                    logger.info(
+                        f"推送完成：{len(all_sent_ids)}/{len(filtered)} 个作品成功"
+                    )
                 else:
                     logger.error("没有任何作品被成功推送")
-                    
+
                 # 5. AI 错误报警
                 ai_errors = profiler.ai_processor.occurred_errors
                 if ai_errors:
@@ -326,23 +383,23 @@ async def main_task(config: dict, client: PixivClient, profiler: XPProfiler, not
                     msg = f"⚠️ 警告：本次任务有 {err_count} 批 Tag AI 优化失败。\n已自动记录并降级处理。"
                     buttons = [("🔄 重试修复", f"retry_ai:{err_id}")]
                     logger.warning(f"AI 优化失败 {err_count} 次，发送警告")
-                    
+
                     for notifier in notifiers:
-                        if hasattr(notifier, 'send_text'):
+                        if hasattr(notifier, "send_text"):
                             try:
                                 await notifier.send_text(msg, buttons)
                             except:
                                 pass
             except Exception as e:
-                logger.error(f"推送过程出错: {e}")
+                logger.error(f"推送过程出错：{e}")
         elif not filtered:
-             logger.info("无新作品可推送")
+            logger.info("无新作品可推送")
         else:
             logger.warning("未配置推送器")
-        
+
     except Exception as e:
-        logger.error(f"任务执行出错: {e}", exc_info=True)
-    
+        logger.error(f"任务执行出错：{e}", exc_info=True)
+
     logger.info("=== 推送任务结束 ===")
 
 
@@ -351,9 +408,9 @@ async def run_once(config: dict, notifiers_factory=None):
     main_client, sync_client, profiler, notifiers = await setup_services(
         config, notifiers_factory=notifiers_factory
     )
-    
+
     # Run-once 是 Fire-and-Forget 行为
-    
+
     try:
         await main_task(config, main_client, profiler, notifiers, sync_client)
     finally:
@@ -361,164 +418,187 @@ async def run_once(config: dict, notifiers_factory=None):
         # 如果 sync_client 是独立实例，也需要关闭
         if sync_client is not main_client:
             await sync_client.close()
-        for n in (notifiers or []):
-            if hasattr(n, 'close'): 
-                try: 
-                    await n.close() 
-                except: 
+        for n in notifiers or []:
+            if hasattr(n, "close"):
+                try:
+                    await n.close()
+                except:
                     pass
+
 
 async def daily_report_task(config: dict, notifiers: list, profiler=None):
     """每日维护任务：生成日报 + 数据清理 + AI 标签刷新
-    
+
     设计原则：
     - 每个步骤独立 try/except，即使某一步失败，其他步骤仍可继续
     - 网络相关操作（AI、发送）使用 retry_async 自动重试
     """
     logger.info("📊 开始执行每日维护任务...")
-    
+
     maintenance_summary = []
     lines = ["📊 **每日 XP 日报**\n"]
-    
+
     # ========== 1. 生成日报 (Top Tags + MAB Stats) ==========
     try:
         from database import get_top_xp_tags, get_all_strategy_stats
-        
+
         top_tags = await get_top_xp_tags(10)
         stats = await get_all_strategy_stats()
-        
+
         if top_tags:
             lines.append("🎯 **Top 10 XP 标签**")
             for i, (tag, weight) in enumerate(top_tags[:10], 1):
                 lines.append(f"  {i}. `{tag}` ({weight:.1f})")
             lines.append("")
-        
+
         if stats:
             lines.append("📈 **MAB 策略表现**")
-            strategy_names = {"search": "XP搜索", "xp_search": "XP搜索", "subscription": "订阅", "ranking": "排行榜"}
+            strategy_names = {
+                "search": "XP 搜索",
+                "xp_search": "XP 搜索",
+                "subscription": "订阅",
+                "ranking": "排行榜",
+            }
             for strategy, data in stats.items():
                 name = strategy_names.get(strategy, strategy)
                 rate_pct = data["rate"] * 100
-                lines.append(f"  • {name}: {data['success']}/{data['total']} ({rate_pct:.1f}%)")
+                lines.append(
+                    f"  • {name}: {data['success']}/{data['total']} ({rate_pct:.1f}%)"
+                )
     except Exception as e:
-        logger.error(f"生成日报统计失败: {e}")
-        maintenance_summary.append(f"⚠️ 日报统计失败: {e}")
-    
+        logger.error(f"生成日报统计失败：{e}")
+        maintenance_summary.append(f"⚠️ 日报统计失败：{e}")
+
     # ========== 2. 同步屏蔽标签到 XP 画像 ==========
     try:
         from database import sync_blocked_tags_to_xp
+
         blocked_removed = await sync_blocked_tags_to_xp()
         if blocked_removed > 0:
-            maintenance_summary.append(f"🚫 从画像中移除 {blocked_removed} 个已屏蔽标签")
+            maintenance_summary.append(
+                f"🚫 从画像中移除 {blocked_removed} 个已屏蔽标签"
+            )
             logger.info(f"已从 XP 画像中移除 {blocked_removed} 个屏蔽标签")
     except Exception as e:
-        logger.error(f"同步屏蔽标签失败: {e}")
-        maintenance_summary.append(f"⚠️ 同步屏蔽标签失败: {e}")
-    
+        logger.error(f"同步屏蔽标签失败：{e}")
+        maintenance_summary.append(f"⚠️ 同步屏蔽标签失败：{e}")
+
     # ========== 3. AI 标签增量处理 (带重试) ==========
-    if profiler and hasattr(profiler, 'ai_processor') and profiler.ai_processor.enabled:
+    if profiler and hasattr(profiler, "ai_processor") and profiler.ai_processor.enabled:
         try:
             from database import get_uncached_tags
+
             uncached_tags = await get_uncached_tags(limit=200)
             if uncached_tags:
                 logger.info(f"发现 {len(uncached_tags)} 个未处理标签，启动 AI 清洗...")
-                
+
                 async def _ai_process():
                     return await profiler.ai_processor.process_tags(uncached_tags)
-                
+
                 result = await retry_async(_ai_process, max_retries=3, delay=10.0)
                 if result:
                     valid_tags, mapping = result
-                    maintenance_summary.append(f"🤖 AI 清洗 {len(uncached_tags)} 个标签 → {len(valid_tags)} 个有效")
-                    logger.info(f"AI 清洗完成: {len(valid_tags)}/{len(uncached_tags)} 有效")
+                    maintenance_summary.append(
+                        f"🤖 AI 清洗 {len(uncached_tags)} 个标签 → {len(valid_tags)} 个有效"
+                    )
+                    logger.info(
+                        f"AI 清洗完成：{len(valid_tags)}/{len(uncached_tags)} 有效"
+                    )
                 else:
                     maintenance_summary.append(f"⚠️ AI 清洗失败 (已重试)")
         except Exception as e:
-            logger.error(f"AI 清洗失败: {e}")
-            maintenance_summary.append(f"⚠️ AI 清洗失败: {e}")
-    
+            logger.error(f"AI 清洗失败：{e}")
+            maintenance_summary.append(f"⚠️ AI 清洗失败：{e}")
+
     # ========== 4. 清理旧推送历史 ==========
     try:
         from database import cleanup_old_sent_history
+
         old_removed = await cleanup_old_sent_history(days=30)
         if old_removed > 0:
             maintenance_summary.append(f"🗑️ 清理 {old_removed} 条过期推送记录")
             logger.info(f"已清理 {old_removed} 条 30 天前的推送历史")
     except Exception as e:
-        logger.error(f"清理推送历史失败: {e}")
-        maintenance_summary.append(f"⚠️ 清理推送历史失败: {e}")
-    
+        logger.error(f"清理推送历史失败：{e}")
+        maintenance_summary.append(f"⚠️ 清理推送历史失败：{e}")
+
     # ========== 5. 清理旧作品缓存 ==========
     try:
         from database import cleanup_old_illust_cache
+
         cache_removed = await cleanup_old_illust_cache(days=60)
         if cache_removed > 0:
             maintenance_summary.append(f"🗑️ 清理 {cache_removed} 条过期作品缓存")
             logger.info(f"已清理 {cache_removed} 条 60 天前的作品缓存")
     except Exception as e:
-        logger.error(f"清理作品缓存失败: {e}")
-        maintenance_summary.append(f"⚠️ 清理作品缓存失败: {e}")
-    
+        logger.error(f"清理作品缓存失败：{e}")
+        maintenance_summary.append(f"⚠️ 清理作品缓存失败：{e}")
+
     # ========== 6. 添加维护摘要到日报 ==========
     if maintenance_summary:
         lines.append("")
         lines.append("🛠️ **维护记录**")
         for item in maintenance_summary:
             lines.append(f"  {item}")
-    
+
     report_msg = "\n".join(lines)
-    
+
     # ========== 7. 发送日报 (带重试) ==========
     async def _send_report():
         for n in notifiers:
-            if hasattr(n, 'send_text'):
+            if hasattr(n, "send_text"):
                 await n.send_text(report_msg)
                 return True
         return False
-    
+
     result = await retry_async(_send_report, max_retries=5, delay=30.0, backoff=2.0)
     if not result:
         logger.error("发送日报最终失败")
-    
+
     logger.info("✅ 每日维护任务完成")
 
 
-async def run_scheduler(config: dict, run_immediately: bool = False, notifiers_factory=None):
+async def run_scheduler(
+    config: dict, run_immediately: bool = False, notifiers_factory=None
+):
     """启动调度器 (Daemon Mode)"""
     main_client, sync_client, profiler, notifiers = await setup_services(
         config, notifiers_factory=notifiers_factory
     )
-    
+
     if run_immediately:
         logger.info("🚀 正在立即执行首次任务...")
-        asyncio.create_task(main_task(config, main_client, profiler, notifiers, sync_client))
+        asyncio.create_task(
+            main_task(config, main_client, profiler, notifiers, sync_client)
+        )
 
     scheduler = AsyncIOScheduler()
     scheduler_cfg = config.get("scheduler", {})
     coalesce = scheduler_cfg.get("coalesce", True)
-    
+
     # 获取调度配置 (优先读取数据库)
     from database import get_state
+
     db_cron = await get_state("schedule_cron")
     config_cron = config.get("scheduler", {}).get("cron", "0 20 * * *")
-    
+
     schedule_str = db_cron if db_cron else config_cron
-    
+
     # 将 scheduler 注入到 config 中以便 callback 访问
-    config['scheduler'] = scheduler
-    
+    config["scheduler"] = scheduler
+
     # 支持多个时间点
     # 逻辑优化：
     # 1. 先尝试将整个字符串作为一个 Cron，如果成功则认为是一个任务 (解决 "0 12,21 * * *" 被误拆的问题)
     # 2. 如果失败，再尝试用逗号分割 (兼容旧的多任务写法 "0 12 * * *, 0 21 * * *")
-    
+
     cron_list = []
-    
+
     # 尝试解析整体
     try:
         CronTrigger.from_crontab(schedule_str.strip())
         cron_list = [schedule_str.strip()]
-        logger.info(f"识别为单一定时任务: {schedule_str}")
+        logger.info(f"识别为单一定时任务：{schedule_str}")
     except ValueError:
         # 整体解析失败，尝试分割
         potential_crons = [c.strip() for c in schedule_str.split(",") if c.strip()]
@@ -528,47 +608,47 @@ async def run_scheduler(config: dict, run_immediately: bool = False, notifiers_f
                 CronTrigger.from_crontab(c)
                 valid_crons.append(c)
             except ValueError:
-                logger.warning(f"忽略无效的 Cron 表达式片段: {c}")
-        
+                logger.warning(f"忽略无效的 Cron 表达式片段：{c}")
+
         if valid_crons:
             cron_list = valid_crons
             logger.info(f"识别为 {len(cron_list)} 个独立定时任务")
         else:
             # 如果分割也全错，那可能就是整体写错了，保留整体让后面报错
             cron_list = [schedule_str]
-    
+
     for i, cron_expr in enumerate(cron_list):
         try:
             scheduler.add_job(
-                main_task, 
+                main_task,
                 CronTrigger.from_crontab(cron_expr),
                 args=[config, main_client, profiler, notifiers, sync_client],
-                id=f'push_job_{i}',
+                id=f"push_job_{i}",
                 coalesce=coalesce,
-                misfire_grace_time=3600
+                misfire_grace_time=3600,
             )
-            logger.info(f"已添加定时任务 #{i+1}: {cron_expr}")
+            logger.info(f"已添加定时任务 #{i + 1}: {cron_expr}")
         except Exception as e:
             logger.error(f"添加定时任务失败 ({cron_expr}): {e}")
-    
+
     # 每日维护任务 (日报 + 清理)
-    daily_cron = scheduler_cfg.get("daily_report_cron", "0 0 * * *")  # 默认每天00:00
+    daily_cron = scheduler_cfg.get("daily_report_cron", "0 0 * * *")  # 默认每天 00:00
     try:
         scheduler.add_job(
             daily_report_task,
             CronTrigger.from_crontab(daily_cron),
             args=[config, notifiers, profiler],  # 传入 profiler 以支持 AI 清洗
-            id='daily_report_job',
+            id="daily_report_job",
             coalesce=True,
-            misfire_grace_time=3600
+            misfire_grace_time=3600,
         )
-        logger.info(f"已添加每日维护任务: {daily_cron}")
+        logger.info(f"已添加每日维护任务：{daily_cron}")
     except Exception as e:
-        logger.error(f"添加每日维护任务失败: {e}")
-    
+        logger.error(f"添加每日维护任务失败：{e}")
+
     scheduler.start()
     logger.info(f"调度器已启动，共 {len(cron_list)} 个推送任务 + 1 个每日维护任务")
-    
+
     try:
         while True:
             await asyncio.sleep(1800)  # 每 30 分钟检查一次
@@ -580,8 +660,8 @@ async def run_scheduler(config: dict, run_immediately: bool = False, notifiers_f
         # 如果 sync_client 是独立实例，也需要关闭
         if sync_client is not main_client:
             await sync_client.close()
-        for n in (notifiers or []):
-            if hasattr(n, 'close'): 
+        for n in notifiers or []:
+            if hasattr(n, "close"):
                 try:
                     await n.close()
                 except:
@@ -591,7 +671,10 @@ async def run_scheduler(config: dict, run_immediately: bool = False, notifiers_f
 def _apply_test_overrides(config: dict) -> None:
     config.setdefault("profiler", {})["scan_limit"] = 10
     config["profiler"]["discovery_rate"] = 0
-    config.setdefault("fetcher", {})["bookmark_threshold"] = {"search": 0, "subscription": 0}
+    config.setdefault("fetcher", {})["bookmark_threshold"] = {
+        "search": 0,
+        "subscription": 0,
+    }
     config.setdefault("fetcher", {})["discovery_limit"] = 1
     config["fetcher"]["ranking"] = {"modes": ["day"], "limit": 1}
     config["test"] = True
@@ -647,7 +730,9 @@ def _build_config_from_astrbot(plugin_cfg: "AstrBotConfig") -> dict:
             "top_n": profiler_cfg.get("top_n", 20),
             "include_private": profiler_cfg.get("include_private", True),
             "stop_words": _get_list(
-                profiler_cfg, "stop_words", ["original", "manga", "pixiv", "illustration"]
+                profiler_cfg,
+                "stop_words",
+                ["original", "manga", "pixiv", "illustration"],
             ),
         },
         "ai": {
@@ -679,7 +764,9 @@ def _build_config_from_astrbot(plugin_cfg: "AstrBotConfig") -> dict:
         "fetcher": {
             "bookmark_threshold": {
                 "search": fetcher_cfg.get("bookmark_threshold", {}).get("search", 1000),
-                "subscription": fetcher_cfg.get("bookmark_threshold", {}).get("subscription", 0),
+                "subscription": fetcher_cfg.get("bookmark_threshold", {}).get(
+                    "subscription", 0
+                ),
             },
             "subscribed_artists": _get_list(fetcher_cfg, "subscribed_artists", []),
             "date_range_days": fetcher_cfg.get("date_range_days", 7),
@@ -690,7 +777,9 @@ def _build_config_from_astrbot(plugin_cfg: "AstrBotConfig") -> dict:
                 {"enabled": True, "modes": ["day", "week", "month"], "limit": 100},
             ),
             "match_score": fetcher_cfg.get("match_score", {}),
-            "mab_limits": fetcher_cfg.get("mab_limits", {"min_quota": 0.2, "max_quota": 0.6}),
+            "mab_limits": fetcher_cfg.get(
+                "mab_limits", {"min_quota": 0.2, "max_quota": 0.6}
+            ),
         },
         "network": {
             "requests_per_minute": network_cfg.get("requests_per_minute", 60),
@@ -786,7 +875,9 @@ class AstrBotNotifier:
             success_ids.append(illust.id)
         return success_ids
 
-    async def send_text(self, text: str, buttons: list[tuple[str, str]] | None = None) -> bool:
+    async def send_text(
+        self, text: str, buttons: list[tuple[str, str]] | None = None
+    ) -> bool:
         if not self.sessions:
             return False
         chain = MessageChain()
@@ -818,6 +909,7 @@ class AstrBotNotifier:
 
 
 if Star is not None:
+
     class PixivXPPusherPlugin(Star):
         """Pixiv XP Pusher plugin wrapper for AstrBot."""
 
@@ -831,7 +923,9 @@ if Star is not None:
             self._last_error: str | None = None
 
             self._auto_start = bool(self.plugin_config.get("auto_start", True))
-            self._run_immediately = bool(self.plugin_config.get("run_immediately", False))
+            self._run_immediately = bool(
+                self.plugin_config.get("run_immediately", False)
+            )
             self._test_mode = bool(self.plugin_config.get("test_mode", False))
             self._enable_file_logging = bool(
                 self.plugin_config.get("enable_file_logging", True)
@@ -843,7 +937,7 @@ if Star is not None:
             if self._auto_start:
                 started, message = await self._start_scheduler()
                 if not started:
-                    logger.error(f"AstrBot: 自动启动失败: {message}")
+                    logger.error(f"AstrBot: 自动启动失败：{message}")
 
         async def terminate(self):
             await self._stop_scheduler()
@@ -865,7 +959,9 @@ if Star is not None:
             setup_logging(log_dir=log_dir)
             setattr(setup_logging, "_astrbot_initialized", True)
 
-        async def _start_scheduler(self, run_immediately: bool | None = None) -> tuple[bool, str]:
+        async def _start_scheduler(
+            self, run_immediately: bool | None = None
+        ) -> tuple[bool, str]:
             if self._scheduler_task and not self._scheduler_task.done():
                 return False, "Scheduler already running."
 
@@ -874,7 +970,9 @@ if Star is not None:
                 return False, "Config not found or empty."
 
             self._ensure_logging()
-            immediate = self._run_immediately if run_immediately is None else run_immediately
+            immediate = (
+                self._run_immediately if run_immediately is None else run_immediately
+            )
             sessions = _build_push_sessions(self.plugin_config)
             if not sessions:
                 return False, "No push sessions configured."
