@@ -1482,8 +1482,9 @@ if Star is not None:
 
             用法：/pixivxp search <query>
             """
-            if not query or not query.strip():
-                yield event.plain_result("请提供搜索内容")
+            raw_query = str(query).strip() if query is not None else ""
+            if not raw_query or raw_query.lower() == "greedystr":
+                yield event.plain_result("用法：/pixivxp search <query>")
                 return
 
             config = self._load_runtime_config()
@@ -1520,7 +1521,7 @@ if Star is not None:
                     return
 
                 illusts = await client.search_illusts(
-                    tags=[query.strip()],
+                    tags=[raw_query],
                     bookmark_threshold=bookmark_threshold,
                     date_range_days=date_range_days,
                     limit=limit,
