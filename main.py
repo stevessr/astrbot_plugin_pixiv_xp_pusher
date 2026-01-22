@@ -21,6 +21,8 @@ from profiler import XPProfiler
 from utils import download_image_with_referer, get_pixiv_cat_url
 
 from astrbot.api import logger
+from astrbot.api.message_components import Reply
+from astrbot.core.platform.astr_message_event import MessageSesion
 from astrbot.core.utils.io import save_temp_img
 
 try:
@@ -37,6 +39,7 @@ except Exception:  # pragma: no cover - allow standalone CLI usage
 
 if TYPE_CHECKING:
     from pixiv_client import Illust
+    from astrbot_plugin_matrix_adapter.matrix_adapter import MatrixPlatformAdapter
 
 
 async def retry_async(
@@ -825,6 +828,37 @@ class AstrBotNotifier:
         self.proxy_url = proxy_url
         self._session: aiohttp.ClientSession | None = None
 
+    def _get_platform_for_session(self, session_str: str):
+        try:
+            session = MessageSesion.from_str(session_str)
+        except Exception:
+            return None, None
+
+        for platform in self.context.platform_manager.get_insts():
+            try:
+                if platform.meta().id == session.platform_id:
+                    return platform, session
+            except Exception:
+                continue
+        return None, session
+
+    def _resolve_matrix_adapter(self, session_str: str):
+        platform, session = self._get_platform_for_session(session_str)
+        if session is None:
+            return None, None
+        if platform is None:
+            return None, session
+        try:
+            from astrbot_plugin_matrix_adapter.matrix_adapter import (
+                MatrixPlatformAdapter,
+            )
+
+            if isinstance(platform, MatrixPlatformAdapter):
+                return platform, session
+        except Exception:
+            return None, session
+        return None, session
+
     def _pick_image_urls(self, illust: "Illust") -> list[str]:
         if not illust.page_count:
             return []
@@ -848,6 +882,51 @@ class AstrBotNotifier:
         except Exception as e:
             logger.warning(f"下载图片失败：{e}")
             return None
+
+    async def _send_text_and_get_reply_id(
+        self,
+        adapter: "MatrixPlatformAdapter",
+        session_id: str,
+        text: str,
+    ) -> str | None:
+        try:
+            from astrbot_plugin_matrix_adapter.sender.handlers.common import (
+                send_content,
+            )
+            from astrbot_plugin_matrix_adapter.utils.markdown_utils import (
+                markdown_to_html,
+            )
+        except Exception:
+            return None
+
+        is_encrypted = False
+        if getattr(adapter, "e2ee_manager", None):
+            try:
+                is_encrypted = await adapter.client.is_room_encrypted(session_id)
+            except Exception as e:
+                logger.debug(f"检查 Matrix 房间加密状态失败：{e}")
+
+        msg_type = "m.notice" if adapter._matrix_config.use_notice else "m.text"
+        content = {"msgtype": msg_type, "body": text}
+        try:
+            content["format"] = "org.matrix.custom.html"
+            content["formatted_body"] = markdown_to_html(text)
+        except Exception:
+            pass
+
+        resp = await send_content(
+            adapter.client,
+            content,
+            session_id,
+            reply_to=None,
+            thread_root=None,
+            use_thread=False,
+            is_encrypted_room=is_encrypted,
+            e2ee_manager=adapter.e2ee_manager,
+        )
+        if not isinstance(resp, dict):
+            return None
+        return resp.get("event_id")
 
     def format_message(self, illust: "Illust") -> str:
         tags = ", ".join(illust.tags[:20]) if illust.tags else "N/A"
@@ -882,13 +961,30 @@ class AstrBotNotifier:
                 else []
             )
             for session in self.sessions:
-                chain = MessageChain()
-                chain.message(self.format_message(illust))
+                reply_id = None
+                adapter, parsed = self._resolve_matrix_adapter(session)
+                if (
+                    adapter is not None
+                    and parsed is not None
+                    and getattr(adapter._matrix_config, "enable_threading", False)
+                ):
+                    reply_id = await self._send_text_and_get_reply_id(
+                        adapter, parsed.session_id, self.format_message(illust)
+                    )
+                else:
+                    text_chain = MessageChain()
+                    text_chain.message(self.format_message(illust))
+                    await self.context.send_message(session, text_chain)
+
+                image_chain = MessageChain()
+                if reply_id:
+                    image_chain.chain.append(Reply(id=reply_id))
                 for url in urls:
                     path = await self._download_to_file(url)
                     if path:
-                        chain.file_image(path)
-                await self.context.send_message(session, chain)
+                        image_chain.file_image(path)
+                if image_chain.chain:
+                    await self.context.send_message(session, image_chain)
             success_ids.append(illust.id)
         return success_ids
 
@@ -919,13 +1015,30 @@ class AstrBotNotifier:
                 else self.format_message(illust)
             )
             for session in self.sessions:
-                chain = MessageChain()
-                chain.message(text)
+                reply_id = None
+                adapter, parsed = self._resolve_matrix_adapter(session)
+                if (
+                    adapter is not None
+                    and parsed is not None
+                    and getattr(adapter._matrix_config, "enable_threading", False)
+                ):
+                    reply_id = await self._send_text_and_get_reply_id(
+                        adapter, parsed.session_id, text
+                    )
+                else:
+                    text_chain = MessageChain()
+                    text_chain.message(text)
+                    await self.context.send_message(session, text_chain)
+
+                image_chain = MessageChain()
+                if reply_id:
+                    image_chain.chain.append(Reply(id=reply_id))
                 if image_urls:
                     path = await self._download_to_file(image_urls[0])
                     if path:
-                        chain.file_image(path)
-                await self.context.send_message(session, chain)
+                        image_chain.file_image(path)
+                if image_chain.chain:
+                    await self.context.send_message(session, image_chain)
             sent_map[illust.id] = None
         return sent_map
 
