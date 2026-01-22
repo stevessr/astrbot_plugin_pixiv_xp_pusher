@@ -2,6 +2,7 @@ import asyncio
 import os
 import sys
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
@@ -14,7 +15,7 @@ from fetcher import ContentFetcher
 from filter import ContentFilter
 from pixiv_client import PixivClient
 from profiler import XPProfiler
-from utils import get_pixiv_cat_url, setup_logging
+from utils import get_pixiv_cat_url
 
 from astrbot.api import logger
 
@@ -29,6 +30,9 @@ except Exception:  # pragma: no cover - allow standalone CLI usage
     Context = None
     Star = None
     filter = None
+
+if TYPE_CHECKING:
+    from pixiv_client import Illust
 
 
 async def retry_async(
@@ -391,8 +395,8 @@ async def main_task(
                         if hasattr(notifier, "send_text"):
                             try:
                                 await notifier.send_text(msg, buttons)
-                            except:
-                                pass
+                            except Exception as e:
+                                logger.debug(f"AI 错误提示发送失败：{e}")
             except Exception as e:
                 logger.error(f"推送过程出错：{e}")
         elif not filtered:
@@ -425,8 +429,8 @@ async def run_once(config: dict, notifiers_factory=None):
             if hasattr(n, "close"):
                 try:
                     await n.close()
-                except:
-                    pass
+                except Exception as e:
+                    logger.debug(f"关闭推送器失败：{e}")
 
 
 async def daily_report_task(config: dict, notifiers: list, profiler=None):
@@ -653,8 +657,8 @@ async def run_scheduler(
     logger.info(f"调度器已启动，共 {len(cron_list)} 个推送任务 + 1 个每日维护任务")
 
     try:
-        while True:
-            await asyncio.sleep(1800)  # 每 30 分钟检查一次
+        stop_event = asyncio.Event()
+        await stop_event.wait()
     except (KeyboardInterrupt, SystemExit, asyncio.CancelledError):
         scheduler.shutdown()
         raise
@@ -667,8 +671,8 @@ async def run_scheduler(
             if hasattr(n, "close"):
                 try:
                     await n.close()
-                except:
-                    pass
+                except Exception as e:
+                    logger.debug(f"关闭推送器失败：{e}")
 
 
 def _apply_test_overrides(config: dict) -> None:
@@ -936,10 +940,6 @@ if Star is not None:
                 self.plugin_config.get("run_immediately", False)
             )
             self._test_mode = bool(self.plugin_config.get("test_mode", False))
-            self._enable_file_logging = bool(
-                self.plugin_config.get("enable_file_logging", True)
-            )
-            self._log_dir = self.plugin_config.get("log_dir", "logs")
             self._use_pixiv_cat = bool(self.plugin_config.get("use_pixiv_cat", True))
 
         async def initialize(self):
@@ -1003,17 +1003,6 @@ if Star is not None:
                 _apply_test_overrides(config)
             return config
 
-        def _ensure_logging(self) -> None:
-            if not self._enable_file_logging:
-                return
-            if getattr(setup_logging, "_astrbot_initialized", False):
-                return
-            log_dir = Path(self._log_dir)
-            if not log_dir.is_absolute():
-                log_dir = self.plugin_dir / log_dir
-            setup_logging(log_dir=log_dir)
-            setattr(setup_logging, "_astrbot_initialized", True)
-
         async def _start_scheduler(
             self, run_immediately: bool | None = None
         ) -> tuple[bool, str]:
@@ -1024,7 +1013,6 @@ if Star is not None:
             if not config:
                 return False, "Config not found or empty."
 
-            self._ensure_logging()
             immediate = (
                 self._run_immediately if run_immediately is None else run_immediately
             )
@@ -1088,7 +1076,6 @@ if Star is not None:
             if not config:
                 return False, "Config not found or empty."
 
-            self._ensure_logging()
             sessions = _build_push_sessions(self.plugin_config)
             if not sessions:
                 return False, "No push sessions configured."

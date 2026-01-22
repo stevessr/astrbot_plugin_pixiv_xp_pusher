@@ -492,8 +492,8 @@ class PixivClient:
                         break
                     try:
                         illusts.append(self._parse_illust(item))
-                    except:
-                        pass
+                    except Exception as e:
+                        logger.debug(f"解析作品失败：{e}")
 
                 next_qs = self.api.parse_qs(result.get("next_url"))
                 if not next_qs:
@@ -545,7 +545,7 @@ class PixivClient:
         create_date_str = data.get("create_date", "")
         try:
             create_date = datetime.fromisoformat(create_date_str.replace("Z", "+00:00"))
-        except:
+        except Exception:
             create_date = datetime.now()
 
         return Illust(

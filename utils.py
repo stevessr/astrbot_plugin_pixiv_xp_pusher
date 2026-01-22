@@ -11,6 +11,7 @@ import asyncio
 import io
 import os
 import random
+import re
 import tempfile
 import time
 import zipfile
@@ -199,8 +200,6 @@ async def download_image_with_referer(
 
 
 # --- Tag Normalization Utilities ---
-
-import re
 
 # 常见别名映射表 (与 profiler.py 保持一致)
 TAG_ALIASES = {

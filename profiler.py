@@ -20,7 +20,7 @@ except ImportError:
 
 import database as db
 from pixiv_client import Illust, PixivClient
-from utils import retry_async
+from utils import TAG_TRANSLATIONS, retry_async
 
 from astrbot.api import logger
 
@@ -287,9 +287,6 @@ class AITagProcessor:
             # 失败时保留所有 tags (Fallback)
             for tag in tags:
                 self._cache[tag] = tag
-
-
-from utils import TAG_TRANSLATIONS
 
 
 def _build_ai_prompt(tags: list[str]) -> str:
@@ -643,7 +640,7 @@ class XPProfiler:
             if isinstance(cdate, str):
                 try:
                     cdate = datetime.fromisoformat(cdate)
-                except:
+                except Exception:
                     cdate = datetime.now()
 
             # 预处理标签：去除 users 入り 后缀等

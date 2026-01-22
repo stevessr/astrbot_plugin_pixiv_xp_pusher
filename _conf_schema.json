@@ -14,16 +14,6 @@
     "type": "bool",
     "default": false
   },
-  "enable_file_logging": {
-    "description": "启用文件日志",
-    "type": "bool",
-    "default": true
-  },
-  "log_dir": {
-    "description": "日志目录（相对插件目录）",
-    "type": "string",
-    "default": "logs"
-  },
   "use_pixiv_cat": {
     "description": "使用 pixiv.cat 作为图片代理",
     "type": "bool",

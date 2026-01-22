@@ -214,7 +214,7 @@ async def init_db():
             )
             await db.commit()
             logger.info("迁移：illust_cache 添加 source 列")
-        except:
+        except Exception:
             pass  # 列已存在
 
         try:
@@ -227,7 +227,7 @@ async def init_db():
             await db.execute("ALTER TABLE illust_cache ADD COLUMN chain_msg_id INTEGER")
             await db.commit()
             logger.info("迁移：illust_cache 添加 chain 列")
-        except:
+        except Exception:
             pass  # 列已存在
 
 
@@ -515,8 +515,8 @@ async def get_recent_liked_tags(limit: int = 10) -> list[str]:
             try:
                 tags = json.loads(row[0])
                 all_tags.extend(tags[:5])  # 每个作品取前 5 个标签
-            except:
-                pass
+            except Exception as e:
+                logger.debug(f"解析点赞标签失败：{e}")
         return all_tags[: limit * 3]  # 返回适量标签
 
 
@@ -542,8 +542,8 @@ async def get_recent_disliked_tags(limit: int = 10) -> list[str]:
             try:
                 tags = json.loads(row[0])
                 all_tags.extend(tags[:5])
-            except:
-                pass
+            except Exception as e:
+                logger.debug(f"解析点踩标签失败：{e}")
         return all_tags[: limit * 3]
 
 
@@ -635,16 +635,6 @@ async def cache_illust(
             ),
         )
         await db.commit()
-
-
-async def get_push_source(illust_id: int) -> str | None:
-    """获取作品的推送来源策略"""
-    async with aiosqlite.connect(DB_PATH) as db:
-        cursor = await db.execute(
-            "SELECT source FROM illust_cache WHERE illust_id = ?", (illust_id,)
-        )
-        row = await cursor.fetchone()
-        return row[0] if row else None
 
 
 async def get_cached_illust_tags(illust_id: int) -> list[str] | None:
@@ -902,8 +892,8 @@ async def get_push_stats(days: int = 7) -> dict:
                 tags = json.loads(row["tags"]) if row["tags"] else []
                 for tag in tags[:5]:  # 只统计前 5 个标签
                     tag_count[tag] = tag_count.get(tag, 0) + 1
-            except:
-                pass
+            except Exception as e:
+                logger.debug(f"统计标签失败：{e}")
 
         top_tags = sorted(tag_count.items(), key=lambda x: x[1], reverse=True)[:5]
 
