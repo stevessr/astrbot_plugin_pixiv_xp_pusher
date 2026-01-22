@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import os
 import sys
-from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -1199,6 +1198,19 @@ if Star is not None:
             if not sessions:
                 return False, "未配置 push_sessions，无法进行测试推送。"
 
+            pixiv_cfg = config.get("pixiv", {})
+            if not pixiv_cfg.get("refresh_token"):
+                return False, "未配置 Pixiv refresh_token，无法拉取测试作品。"
+
+            network_cfg = config.get("network", {})
+            client = PixivClient(
+                refresh_token=pixiv_cfg.get("refresh_token"),
+                requests_per_minute=network_cfg.get("requests_per_minute", 60),
+                random_delay=tuple(network_cfg.get("random_delay", [1.0, 3.0])),
+                max_concurrency=network_cfg.get("max_concurrency", 5),
+                proxy_url=network_cfg.get("proxy_url"),
+            )
+
             use_pixiv_cat = bool(self.plugin_config.get("use_pixiv_cat", True))
             notifier = AstrBotNotifier(
                 context=self.context,
@@ -1208,21 +1220,29 @@ if Star is not None:
                     "multi_page_mode", "cover_link"
                 ),
                 use_pixiv_cat=use_pixiv_cat,
-                proxy_url=config.get("network", {}).get("proxy_url"),
+                proxy_url=network_cfg.get("proxy_url"),
             )
 
-            now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            msg = (
-                "🧪 PixivXP 测试推送\n"
-                f"时间：{now_str}\n"
-                f"会话数：{len(sessions)}\n"
-                "说明：仅用于验证推送通道是否可用。"
-            )
+            try:
+                logged_in = await client.login()
+                if not logged_in:
+                    return False, "Pixiv 登录失败或未登录，无法获取测试作品。"
 
-            ok = await notifier.send_text(msg)
-            if ok:
-                return True, "✅ 测试推送已发送，请在目标会话中确认收到。"
-            return False, "❌ 测试推送发送失败，请检查日志与会话配置。"
+                illusts = await client.get_ranking(limit=1)
+                if not illusts:
+                    return False, "未获取到测试作品，请稍后重试。"
+
+                illust = illusts[0]
+                await notifier.push_illusts(
+                    [illust], message_prefix="🧪 PixivXP 测试推送"
+                )
+                return True, f"✅ 已发送测试作品：{illust.title} (#{illust.id})"
+            except Exception as e:
+                logger.error(f"测试推送失败：{e}")
+                return False, f"❌ 测试推送失败：{e}"
+            finally:
+                await notifier.close()
+                await client.close()
 
         @filter.command_group("pixivxp", alias={"pixiv", "xp"})
         def pixivxp(self):

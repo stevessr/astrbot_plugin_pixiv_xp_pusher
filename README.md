@@ -2,6 +2,8 @@
 
 基于 Pixiv XP 画像的定时推送插件（AstrBot 版本），使用 AstrBot 内置主动推送渠道发送消息。
 
+上游：https://github.com/bwwq/Pixiv-XP-Pusher
+
 ## 使用说明
 
 1. 在 AstrBot 插件配置中填写以下内容：
@@ -28,3 +30,5 @@
 
 - 如未启用 AstrBot Provider，可自行安装 `openai` 以使用 AI 标签清洗/精排
 - 如需本地转换动图（ugoira），请安装 `Pillow` 与 `imageio[ffmpeg]`
+
+只在 matrix 平台适配器做过测试
