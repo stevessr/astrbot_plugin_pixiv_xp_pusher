@@ -948,6 +948,14 @@ class AstrBotNotifier:
 
         success_ids = []
         for illust in illusts:
+            if not illust.title or not illust.user_name:
+                logger.warning(
+                    "跳过元数据不完整的作品：id=%s title=%s user=%s",
+                    illust.id,
+                    illust.title,
+                    illust.user_name,
+                )
+                continue
             image_urls = self._pick_image_urls(illust)
             urls = (
                 image_urls
@@ -956,6 +964,17 @@ class AstrBotNotifier:
                 if image_urls
                 else []
             )
+            if not urls:
+                logger.warning("跳过无可下载图片的作品：id=%s", illust.id)
+                continue
+            downloaded_paths = []
+            for url in urls:
+                path = await self._download_to_file(url)
+                if path:
+                    downloaded_paths.append(path)
+            if not downloaded_paths:
+                logger.warning("跳过下载失败的作品：id=%s", illust.id)
+                continue
             for session in self.sessions:
                 reply_id = None
                 adapter, parsed = self._resolve_matrix_adapter(session)
@@ -975,10 +994,8 @@ class AstrBotNotifier:
                 image_chain = MessageChain()
                 if reply_id:
                     image_chain.chain.append(Reply(id=reply_id))
-                for url in urls:
-                    path = await self._download_to_file(url)
-                    if path:
-                        image_chain.file_image(path)
+                for path in downloaded_paths:
+                    image_chain.file_image(path)
                 if image_chain.chain:
                     await self.context.send_message(session, image_chain)
             success_ids.append(illust.id)
@@ -1004,7 +1021,22 @@ class AstrBotNotifier:
         if not illusts:
             return sent_map
         for illust in illusts:
+            if not illust.title or not illust.user_name:
+                logger.warning(
+                    "跳过元数据不完整的作品：id=%s title=%s user=%s",
+                    illust.id,
+                    illust.title,
+                    illust.user_name,
+                )
+                continue
             image_urls = self._pick_image_urls(illust)
+            if not image_urls:
+                logger.warning("跳过无可下载图片的作品：id=%s", illust.id)
+                continue
+            path = await self._download_to_file(image_urls[0])
+            if not path:
+                logger.warning("跳过下载失败的作品：id=%s", illust.id)
+                continue
             text = (
                 f"{message_prefix}\n{self.format_message(illust)}"
                 if message_prefix
@@ -1029,10 +1061,7 @@ class AstrBotNotifier:
                 image_chain = MessageChain()
                 if reply_id:
                     image_chain.chain.append(Reply(id=reply_id))
-                if image_urls:
-                    path = await self._download_to_file(image_urls[0])
-                    if path:
-                        image_chain.file_image(path)
+                image_chain.file_image(path)
                 if image_chain.chain:
                     await self.context.send_message(session, image_chain)
             sent_map[illust.id] = None
