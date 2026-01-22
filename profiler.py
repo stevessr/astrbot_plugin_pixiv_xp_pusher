@@ -54,8 +54,11 @@ TAG_ALIASES = {
 class AITagProcessor:
     """AI Tag 处理器 - 过滤无意义 tag 和归类同义 tag"""
 
-    def __init__(self, config: dict):
-        self.enabled = config.get("enabled", False) and HAS_OPENAI
+    def __init__(self, config: dict, provider=None):
+        self._provider = provider
+        self.enabled = config.get("enabled", False) and (
+            HAS_OPENAI or provider is not None
+        )
         self.filter_meaningless = config.get("filter_meaningless", True)
         self.merge_synonyms = config.get("merge_synonyms", True)
         self.model = config.get("model", "gpt-4o-mini")
@@ -63,7 +66,7 @@ class AITagProcessor:
         self.concurrency = config.get("concurrency", 3)  # 并发数
         self.pattern_users = re.compile(r"^(.*?)\d+users 入り$")  # 预编译正则
 
-        if self.enabled:
+        if self.enabled and self._provider is None:
             self.client = AsyncOpenAI(
                 api_key=config.get("api_key", ""),
                 base_url=config.get("base_url") or None,
@@ -146,6 +149,15 @@ class AITagProcessor:
     @retry_async(max_retries=3, delay=2.0)
     async def _call_api(self, prompt: str) -> str:
         """调用 AI API（流式，防止超时）"""
+        if self._provider is not None:
+            resp = await self._provider.text_chat(
+                prompt=prompt,
+                system_prompt="你是一个 Pixiv 插画标签数据处理专家，只输出标准 JSON。",
+                model=self.model,
+                temperature=0.1,
+            )
+            return resp.completion_text or ""
+
         response = await self.client.chat.completions.create(
             model=self.model,
             messages=[
@@ -362,12 +374,13 @@ class XPProfiler:
         time_decay_days: int = 180,
         ai_config: Optional[dict] = None,
         saturation_threshold: float = 0.5,
+        ai_provider=None,
     ):
         self.client = client
         self.stop_words = set(stop_words or [])
         self.discovery_rate = discovery_rate
         self.time_decay_days = time_decay_days
-        self.ai_processor = AITagProcessor(ai_config or {})
+        self.ai_processor = AITagProcessor(ai_config or {}, provider=ai_provider)
         self.saturation_threshold = saturation_threshold  # 高频 Tag 饱和度阈值
         self._blocked_artist_ids: set[int] = set()  # 初始化，由 load_blacklist 填充
 

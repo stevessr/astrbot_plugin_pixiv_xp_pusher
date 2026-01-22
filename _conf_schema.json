@@ -29,6 +29,21 @@
     "type": "bool",
     "default": true
   },
+  "use_astrbot_providers": {
+    "description": "使用 AstrBot 预配置的 LLM/Embedding Provider",
+    "type": "bool",
+    "default": false
+  },
+  "chat_provider_id": {
+    "description": "LLM Provider ID（用于 AI 标签清洗/精排）",
+    "type": "string",
+    "default": ""
+  },
+  "embedding_provider_id": {
+    "description": "Embedding Provider ID",
+    "type": "string",
+    "default": ""
+  },
   "push_sessions": {
     "description": "主动推送会话（umo 列表）",
     "type": "list",
@@ -55,6 +70,59 @@
     "description": "启用的策略列表",
     "type": "list",
     "default": ["xp_search", "related", "ranking", "subscription"]
+  },
+  "ai": {
+    "description": "AI 增强功能",
+    "type": "object",
+    "items": {
+      "embedding": {
+        "description": "语义匹配（Embedding）",
+        "type": "object",
+        "items": {
+          "enabled": {
+            "description": "启用 Embedding",
+            "type": "bool",
+            "default": false
+          },
+          "dimensions": {
+            "description": "向量维度",
+            "type": "int",
+            "default": 256
+          },
+          "cache_ttl_days": {
+            "description": "缓存天数",
+            "type": "int",
+            "default": 30
+          },
+          "semantic_weight": {
+            "description": "语义分数权重",
+            "type": "float",
+            "default": 0.3
+          }
+        }
+      },
+      "scorer": {
+        "description": "LLM 精排评分",
+        "type": "object",
+        "items": {
+          "enabled": {
+            "description": "启用精排评分",
+            "type": "bool",
+            "default": false
+          },
+          "max_candidates": {
+            "description": "最大候选数量",
+            "type": "int",
+            "default": 50
+          },
+          "score_weight": {
+            "description": "精排分数权重",
+            "type": "float",
+            "default": 0.3
+          }
+        }
+      }
+    }
   },
   "max_pages": {
     "description": "多图作品最大页数",
@@ -354,6 +422,11 @@
         "description": "下载并发数",
         "type": "int",
         "default": 5
+      },
+      "proxy_url": {
+        "description": "代理地址",
+        "type": "string",
+        "default": ""
       }
     }
   }

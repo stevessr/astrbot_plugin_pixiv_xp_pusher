@@ -10,11 +10,10 @@ AI Embedding 模块
 """
 
 import asyncio
+import logging
+import math
 from dataclasses import dataclass
 from typing import Optional
-
-import loggings
-import numpy as np
 
 logger = logging.getLogger(__name__)
 
@@ -60,7 +59,7 @@ class Embedder:
     3. 相似度计算 (余弦相似度)
     """
 
-    def __init__(self, config: dict):
+    def __init__(self, config: dict, embedding_provider=None):
         """
         初始化 Embedder
 
@@ -76,6 +75,21 @@ class Embedder:
 
         self._client = None
         self._local_model = None
+        self._astrbot_provider = embedding_provider
+
+        if self._astrbot_provider is not None:
+            if not self.enabled:
+                return
+            self.provider = "astrbot"
+            try:
+                if hasattr(self._astrbot_provider, "get_dim"):
+                    self.dimensions = int(
+                        config.get("dimensions") or self._astrbot_provider.get_dim()
+                    )
+            except Exception as e:
+                logger.warning(f"读取 Embedding 维度失败：{e}")
+            logger.info("Embedder 已绑定 AstrBot Embedding Provider")
+            return
 
         if not self.enabled:
             return
@@ -129,6 +143,9 @@ class Embedder:
             return None
 
         try:
+            if self.provider == "astrbot":
+                return await self._astrbot_provider.get_embedding(text)
+
             if self.provider == "openai":
                 response = await self._client.embeddings.create(
                     model=self.model, input=text, dimensions=self.dimensions
@@ -192,6 +209,9 @@ class Embedder:
             return [None] * len(texts)
 
         try:
+            if self.provider == "astrbot":
+                return await self._astrbot_provider.get_embeddings(texts)
+
             if self.provider == "openai":
                 response = await self._client.embeddings.create(
                     model=self.model, input=texts, dimensions=self.dimensions
@@ -228,13 +248,15 @@ class Embedder:
         if not vec1 or not vec2:
             return 0.0
 
-        a = np.array(vec1)
-        b = np.array(vec2)
-
-        # 余弦相似度
-        dot_product = np.dot(a, b)
-        norm_a = np.linalg.norm(a)
-        norm_b = np.linalg.norm(b)
+        dot_product = 0.0
+        norm_a = 0.0
+        norm_b = 0.0
+        for a_val, b_val in zip(vec1, vec2):
+            dot_product += a_val * b_val
+            norm_a += a_val * a_val
+            norm_b += b_val * b_val
+        norm_a = math.sqrt(norm_a)
+        norm_b = math.sqrt(norm_b)
 
         if norm_a == 0 or norm_b == 0:
             return 0.0

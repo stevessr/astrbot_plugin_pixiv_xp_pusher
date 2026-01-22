@@ -128,6 +128,7 @@ async def setup_services(config: dict, notifiers_factory=None):
         time_decay_days=profiler_cfg.get("time_decay_days", 180),
         ai_config=profiler_cfg.get("ai"),
         saturation_threshold=profiler_cfg.get("saturation_threshold", 0.5),
+        ai_provider=config.get("_astrbot_chat_provider"),
     )
 
     # Init Notifiers (使用 main_client 用于下载图片等，sync_client 用于 on_action 回调)
@@ -241,6 +242,9 @@ async def main_task(
         filter_cfg = config.get("filter", {})
         match_cfg = fetcher_cfg.get("match_score", {})
 
+        astrbot_chat_provider = config.get("_astrbot_chat_provider")
+        astrbot_embedding_provider = config.get("_astrbot_embedding_provider")
+
         # 初始化可选的 Embedder (AI 语义匹配)
         embedder = None
         ai_cfg = config.get("ai", {})
@@ -249,7 +253,9 @@ async def main_task(
             try:
                 from embedder import Embedder
 
-                embedder = Embedder(embedding_cfg)
+                embedder = Embedder(
+                    embedding_cfg, embedding_provider=astrbot_embedding_provider
+                )
                 if embedder.enabled:
                     logger.info(f"已启用 AI 语义匹配 (model={embedder.model})")
             except Exception as e:
@@ -279,9 +285,9 @@ async def main_task(
                         "max_candidates": scorer_cfg.get("max_candidates", 50),
                         "score_weight": scorer_cfg.get("score_weight", 0.3),
                     }
-                    ai_scorer = AIScorer(merged_cfg)
+                    ai_scorer = AIScorer(merged_cfg, provider=astrbot_chat_provider)
                 else:
-                    ai_scorer = AIScorer(scorer_cfg)
+                    ai_scorer = AIScorer(scorer_cfg, provider=astrbot_chat_provider)
 
                 if ai_scorer.enabled:
                     logger.info(f"已启用 AI 精排评分 (model={ai_scorer.model})")
@@ -785,6 +791,12 @@ def _build_config_from_astrbot(plugin_cfg: "AstrBotConfig") -> dict:
             "requests_per_minute": network_cfg.get("requests_per_minute", 60),
             "random_delay": network_cfg.get("random_delay", [1.0, 3.0]),
             "max_concurrency": network_cfg.get("max_concurrency", 5),
+            "proxy_url": network_cfg.get("proxy_url", ""),
+        },
+        "astrbot": {
+            "use_astrbot_providers": plugin_cfg.get("use_astrbot_providers", False),
+            "chat_provider_id": plugin_cfg.get("chat_provider_id", ""),
+            "embedding_provider_id": plugin_cfg.get("embedding_provider_id", ""),
         },
         "notifier": {
             "max_pages": plugin_cfg.get("max_pages", 10),
@@ -944,6 +956,52 @@ if Star is not None:
 
         def _load_runtime_config(self) -> dict | None:
             config = _build_config_from_astrbot(self.plugin_config)
+            astrbot_cfg = config.get("astrbot", {})
+            if astrbot_cfg.get("use_astrbot_providers"):
+                chat_provider_id = astrbot_cfg.get("chat_provider_id") or ""
+                embedding_provider_id = astrbot_cfg.get("embedding_provider_id") or ""
+
+                chat_provider = None
+                if chat_provider_id:
+                    chat_provider = self.context.get_provider_by_id(chat_provider_id)
+                    if not chat_provider:
+                        logger.warning(
+                            f"AstrBot: 未找到 LLM Provider ID: {chat_provider_id}"
+                        )
+                    elif not hasattr(chat_provider, "text_chat"):
+                        logger.warning(
+                            f"AstrBot: Provider ID {chat_provider_id} 不是可用的 LLM Provider"
+                        )
+                        chat_provider = None
+                else:
+                    try:
+                        chat_provider = self.context.get_using_provider()
+                    except Exception as exc:
+                        logger.warning(f"AstrBot: 获取默认 LLM Provider 失败：{exc}")
+
+                embedding_provider = None
+                if embedding_provider_id:
+                    embedding_provider = self.context.get_provider_by_id(
+                        embedding_provider_id
+                    )
+                    if not embedding_provider:
+                        logger.warning(
+                            f"AstrBot: 未找到 Embedding Provider ID: {embedding_provider_id}"
+                        )
+                    elif not hasattr(embedding_provider, "get_embedding"):
+                        logger.warning(
+                            f"AstrBot: Provider ID {embedding_provider_id} 不是可用的 Embedding Provider"
+                        )
+                        embedding_provider = None
+                else:
+                    providers = self.context.get_all_embedding_providers()
+                    if providers:
+                        embedding_provider = providers[0]
+                    else:
+                        logger.warning("AstrBot: 未配置 Embedding Provider")
+
+                config["_astrbot_chat_provider"] = chat_provider
+                config["_astrbot_embedding_provider"] = embedding_provider
             if self._test_mode:
                 _apply_test_overrides(config)
             return config

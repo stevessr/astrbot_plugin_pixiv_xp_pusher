@@ -9,6 +9,9 @@
    - 设置主动推送会话：
      - 推荐直接填写 `push_sessions`（umo 列表）
      - 或填写 `platform_name` + `target_groups` / `target_users` 自动生成
+   - 如需复用 AstrBot 已配置的 LLM/Embedding Provider：
+     - 打开 `use_astrbot_providers`
+     - 填写 `chat_provider_id` 与 `embedding_provider_id`（由用户自行选择 Provider ID）
 2. 启动插件：`/pixivxp start`
 
 ## 常用指令
@@ -23,8 +26,8 @@
 
 - 本插件已移除 Telegram/OneBot/Web 管理等外部通道，仅保留 AstrBot 主动推送。
 - 多图发送模式由 `multi_page_mode` 控制：`cover_link` 或 `multi_image`。
+
 ## 可选依赖
 
-- 如需启用 AI 标签清洗/语义匹配，请自行安装 `openai`
-- 如需本地转换动图（ugoira），请自行安装 `Pillow` 与 `imageio[ffmpeg]`
-
+- 如未启用 AstrBot Provider，可自行安装 `openai` 以使用 AI 标签清洗/精排
+- 如需本地转换动图（ugoira），请安装 `Pillow` 与 `imageio[ffmpeg]`
