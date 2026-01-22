@@ -67,10 +67,11 @@ class AITagProcessor:
             logger.warning("未配置 Profiler AI model，功能已禁用")
             self.enabled = False
 
+        self.base_url = config.get("base_url") or None
         if self.enabled:
             self.client = AsyncOpenAI(
                 api_key=config.get("api_key", ""),
-                base_url=config.get("base_url") or None,
+                base_url=self.base_url,
             )
         else:
             self.client = None
@@ -151,34 +152,71 @@ class AITagProcessor:
     async def _call_api(self, prompt: str) -> str:
         """调用 AI API（流式，防止超时）"""
         if self._provider is not None:
-            resp = await self._provider.text_chat(
-                prompt=prompt,
-                system_prompt="你是一个 Pixiv 插画标签数据处理专家，只输出标准 JSON。",
+            try:
+                resp = await self._provider.text_chat(
+                    prompt=prompt,
+                    system_prompt="你是一个 Pixiv 插画标签数据处理专家，只输出标准 JSON。",
+                    model=self.model,
+                    temperature=0.1,
+                )
+                return resp.completion_text or ""
+            except Exception as e:
+                self._log_api_error(e, prompt=prompt, stream_started=False)
+                raise
+
+        stream_started = False
+        try:
+            response = await self.client.chat.completions.create(
                 model=self.model,
+                messages=[
+                    {
+                        "role": "system",
+                        "content": "你是一个 Pixiv 插画标签数据处理专家，只输出标准 JSON。",
+                    },
+                    {"role": "user", "content": prompt},
+                ],
                 temperature=0.1,
+                response_format={"type": "json_object"},
+                stream=True,  # 启用流式
             )
-            return resp.completion_text or ""
+            stream_started = True
 
-        response = await self.client.chat.completions.create(
-            model=self.model,
-            messages=[
-                {
-                    "role": "system",
-                    "content": "你是一个 Pixiv 插画标签数据处理专家，只输出标准 JSON。",
-                },
-                {"role": "user", "content": prompt},
-            ],
-            temperature=0.1,
-            response_format={"type": "json_object"},
-            stream=True,  # 启用流式
+            collected_content = []
+            async for chunk in response:
+                if chunk.choices and chunk.choices[0].delta.content:
+                    collected_content.append(chunk.choices[0].delta.content)
+
+            return "".join(collected_content)
+        except Exception as e:
+            self._log_api_error(e, prompt=prompt, stream_started=stream_started)
+            raise
+
+    def _log_api_error(self, exc: Exception, prompt: str, stream_started: bool) -> None:
+        status_code = getattr(exc, "status_code", None)
+        response = getattr(exc, "response", None)
+        request_id = None
+        if response is not None:
+            headers = getattr(response, "headers", None)
+            if headers:
+                request_id = headers.get("x-request-id") or headers.get("request-id")
+
+        error_message = None
+        error_type = None
+        error_code = None
+        body = getattr(exc, "body", None)
+        if isinstance(body, dict):
+            payload = body.get("error") or body.get("detail") or body
+            if isinstance(payload, dict):
+                error_message = payload.get("message")
+                error_type = payload.get("type")
+                error_code = payload.get("code")
+
+        fallback_type = exc.__class__.__name__
+        base_url = self.base_url or "default"
+        logger.warning(
+            f"OpenAI 调用异常：status={status_code} request_id={request_id} model={self.model} base_url={base_url} "
+            f"stream_started={stream_started} prompt_len={len(prompt)} error_type={error_type or fallback_type} error_code={error_code} error_message={error_message or str(exc)} exc={str(exc)}"
         )
-
-        collected_content = []
-        async for chunk in response:
-            if chunk.choices and chunk.choices[0].delta.content:
-                collected_content.append(chunk.choices[0].delta.content)
-
-        return "".join(collected_content)
 
     async def _batch_process(self, tags: list[str]):
         """并发批量处理 Tag"""
