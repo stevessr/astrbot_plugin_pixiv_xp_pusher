@@ -46,6 +46,9 @@
           "provider": {
             "description": "Embedding Provider (openai/local)",
             "type": "string",
+            "condition": {
+              "enabled": true
+            },
             "options": ["openai", "local"],
             "default": "openai"
           },
@@ -53,7 +56,7 @@
             "description": "Embedding 模型名（OpenAI 或本地模型名）",
             "type": "string",
             "condition": {
-              "ai.embedding.enabled": true
+              "enabled": true
             },
             "default": "text-embedding-3-small"
           },
@@ -61,8 +64,8 @@
             "description": "Embedding API Key",
             "type": "string",
             "condition": {
-              "ai.embedding.enabled": true,
-              "ai.embedding.provider": "openai"
+              "enabled": true,
+              "provider": "openai"
             },
             "default": ""
           },
@@ -70,8 +73,8 @@
             "description": "Embedding API Base URL",
             "type": "string",
             "condition": {
-              "ai.embedding.enabled": true,
-              "ai.embedding.provider": "openai"
+              "enabled": true,
+              "provider": "openai"
             },
             "default": ""
           },
@@ -79,18 +82,24 @@
             "description": "向量维度",
             "type": "int",
             "condition": {
-              "ai.embedding.enabled": true
+              "enabled": true
             },
             "default": 256
           },
           "cache_ttl_days": {
             "description": "缓存天数",
             "type": "int",
+            "condition": {
+              "enabled": true
+            },
             "default": 30
           },
           "semantic_weight": {
             "description": "语义分数权重",
             "type": "float",
+            "condition": {
+              "enabled": true
+            },
             "default": 0.3
           }
         }
@@ -139,11 +148,17 @@
           "max_candidates": {
             "description": "最大候选数量",
             "type": "int",
+            "condition": {
+              "enabled": true
+            },
             "default": 50
           },
           "score_weight": {
             "description": "精排分数权重",
             "type": "float",
+            "condition": {
+              "enabled": true
+            },
             "default": 0.3
           }
         }
@@ -389,42 +404,66 @@
           "provider": {
             "description": "AI 提供商",
             "type": "string",
-            "default": "openai"
+            "default": "openai",
+            "condition": {
+              "enabled": true
+            }
           },
           "api_key": {
             "description": "API Key",
             "type": "string",
-            "default": ""
+            "default": "",
+            "condition": {
+              "enabled": true
+            }
           },
           "base_url": {
             "description": "API Base URL",
             "type": "string",
-            "default": ""
+            "default": "",
+            "condition": {
+              "enabled": true
+            }
           },
           "model": {
             "description": "模型名称",
             "type": "string",
-            "default": "gpt-4o-mini"
+            "default": "gpt-4o-mini",
+            "condition": {
+              "enabled": true
+            }
           },
           "concurrency": {
             "description": "并发数",
             "type": "int",
-            "default": 10
+            "default": 10,
+            "condition": {
+              "enabled": true
+            }
           },
           "batch_size": {
             "description": "批次大小",
             "type": "int",
-            "default": 200
+            "default": 200,
+            "condition": {
+              "enabled": true
+            }
           },
           "filter_meaningless": {
             "description": "过滤无意义标签",
             "type": "bool",
-            "default": true
+            "default": true,
+            "condition": {
+              "enabled": true
+            }
           },
           "merge_synonyms": {
             "description": "合并同义词",
             "type": "bool",
-            "default": true
+            "default": true,
+            "condition": {
+              "enabled": true
+            }
           }
         }
       }
