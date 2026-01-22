@@ -221,8 +221,8 @@ class PixivClient:
         bookmark_threshold: int = 0,
         date_range_days: int = 30,  # 默认扩大到 30 天，增加命中率
         limit: int = 50,
-        search_target: str = "partial_match_for_tags",
-        sort: str = "popular_desc",
+        search_target: str | None = "partial_match_for_tags",
+        sort: str | None = "popular_desc",
     ) -> list[Illust]:
         """
         搜索作品
@@ -253,19 +253,31 @@ class PixivClient:
                 "%Y-%m-%d"
             )
 
+        import inspect
+
+        search_params = {"word": query}
+        try:
+            params = inspect.signature(self.api.search_illust).parameters
+            if "search_target" in params and search_target:
+                search_params["search_target"] = search_target
+            if "sort" in params and sort:
+                search_params["sort"] = sort
+            if "start_date" in params and start_date:
+                search_params["start_date"] = start_date
+            if "end_date" in params and date_range_days > 0:
+                search_params["end_date"] = datetime.now().strftime("%Y-%m-%d")
+        except Exception:
+            # Fallback: only pass required word
+            search_params = {"word": query}
+            if start_date:
+                search_params["start_date"] = start_date
+
         while len(illusts) < limit:
             async with self.rate_limiter:
                 if next_qs:
                     result = await self.api.search_illust(**next_qs)
                 else:
-                    params = {
-                        "word": query,
-                        "search_target": search_target,
-                        "sort": sort,
-                    }
-                    if start_date:
-                        params["start_date"] = start_date
-                    result = await self.api.search_illust(**params)
+                    result = await self.api.search_illust(**search_params)
 
             if not result.get("illusts"):
                 break

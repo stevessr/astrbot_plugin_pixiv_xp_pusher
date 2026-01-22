@@ -1666,6 +1666,7 @@ if Star is not None:
                     date_range_days=date_range_days,
                     limit=search_limit,
                     search_target="partial_match_for_tags",
+                    sort="date_desc",
                 )
                 if not illusts and date_range_days > 0:
                     illusts = await client.search_illusts(
@@ -1674,6 +1675,7 @@ if Star is not None:
                         date_range_days=0,
                         limit=search_limit,
                         search_target="title_and_caption",
+                        sort="date_desc",
                     )
                 if not illusts:
                     yield event.plain_result("未找到相关插画。")
