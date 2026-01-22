@@ -1,4 +1,5 @@
 from __future__ import annotations
+
 import asyncio
 import os
 import sys
@@ -11,14 +12,16 @@ from apscheduler.triggers.cron import CronTrigger
 # Ensure project root in path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+import aiohttp
 from database import cache_illust, init_db, mark_pushed
 from fetcher import ContentFetcher
 from filter import ContentFilter
 from pixiv_client import PixivClient
 from profiler import XPProfiler
-from utils import get_pixiv_cat_url
+from utils import download_image_with_referer, get_pixiv_cat_url
 
 from astrbot.api import logger
+from astrbot.core.utils.io import save_temp_img
 
 try:
     from astrbot.api import AstrBotConfig
@@ -810,17 +813,7 @@ def _build_config_from_astrbot(plugin_cfg: "AstrBotConfig") -> dict:
 
 
 def _build_push_sessions(plugin_cfg: "AstrBotConfig") -> list[str]:
-    sessions = _get_list(plugin_cfg, "push_sessions", [])
-    if sessions:
-        return sessions
-    platform_name = plugin_cfg.get("platform_name", "default")
-    groups = _get_list(plugin_cfg, "target_groups", [])
-    users = _get_list(plugin_cfg, "target_users", [])
-    for gid in groups:
-        sessions.append(f"{platform_name}:GroupMessage:{gid}")
-    for uid in users:
-        sessions.append(f"{platform_name}:PrivateMessage:{uid}")
-    return sessions
+    return _get_list(plugin_cfg, "push_sessions", [])
 
 
 class AstrBotNotifier:
@@ -833,12 +826,15 @@ class AstrBotNotifier:
         max_pages: int = 10,
         multi_page_mode: str = "cover_link",
         use_pixiv_cat: bool = True,
+        proxy_url: str | None = None,
     ) -> None:
         self.context = context
         self.sessions = sessions
         self.max_pages = max_pages
         self.multi_page_mode = multi_page_mode
         self.use_pixiv_cat = use_pixiv_cat
+        self.proxy_url = proxy_url
+        self._session: aiohttp.ClientSession | None = None
 
     def _pick_image_urls(self, illust: "Illust") -> list[str]:
         if not illust.page_count:
@@ -849,6 +845,22 @@ class AstrBotNotifier:
         if illust.image_urls:
             return illust.image_urls[:limit]
         return []
+
+    async def _get_session(self) -> aiohttp.ClientSession:
+        if self._session is None or self._session.closed:
+            self._session = aiohttp.ClientSession()
+        return self._session
+
+    async def _download_to_file(self, url: str) -> str | None:
+        try:
+            session = await self._get_session()
+            data = await download_image_with_referer(
+                session, url, proxy=self.proxy_url
+            )
+            return save_temp_img(data)
+        except Exception as e:
+            logger.warning(f"下载图片失败：{e}")
+            return None
 
     def format_message(self, illust: "Illust") -> str:
         tags = ", ".join(illust.tags[:20]) if illust.tags else "N/A"
@@ -879,11 +891,17 @@ class AstrBotNotifier:
 
             image_urls = self._pick_image_urls(illust)
             if image_urls:
-                if self.multi_page_mode == "multi_image":
-                    for url in image_urls:
+                urls = (
+                    image_urls
+                    if self.multi_page_mode == "multi_image"
+                    else [image_urls[0]]
+                )
+                for url in urls:
+                    path = await self._download_to_file(url)
+                    if path:
+                        chain.file_image(path)
+                    else:
                         chain.url_image(url)
-                else:
-                    chain.url_image(image_urls[0])
 
             await self._send_chain(chain)
             success_ids.append(illust.id)
@@ -916,10 +934,18 @@ class AstrBotNotifier:
 
             image_urls = self._pick_image_urls(illust)
             if image_urls:
-                chain.url_image(image_urls[0])
+                path = await self._download_to_file(image_urls[0])
+                if path:
+                    chain.file_image(path)
+                else:
+                    chain.url_image(image_urls[0])
             await self._send_chain(chain)
             sent_map[illust.id] = None
         return sent_map
+
+    async def close(self) -> None:
+        if self._session and not self._session.closed:
+            await self._session.close()
 
 
 if Star is not None:
@@ -963,7 +989,7 @@ if Star is not None:
                 if chat_provider_id:
                     chat_provider = self.context.get_provider_by_id(chat_provider_id)
                     if not chat_provider:
-                        # 允许用“提供商源ID/显示名”前缀匹配
+                        # 允许用“提供商源 ID/显示名”前缀匹配
                         candidates = [
                             p
                             for p in self.context.get_all_providers()
@@ -976,7 +1002,7 @@ if Star is not None:
                             )
                         elif candidates:
                             logger.warning(
-                                f"AstrBot: LLM Provider ID '{chat_provider_id}' 匹配到多个候选: "
+                                f"AstrBot: LLM Provider ID '{chat_provider_id}' 匹配到多个候选："
                                 + ", ".join(p.meta().id for p in candidates)
                             )
                         else:
@@ -1013,7 +1039,7 @@ if Star is not None:
                             )
                         elif candidates:
                             logger.warning(
-                                f"AstrBot: Embedding Provider ID '{embedding_provider_id}' 匹配到多个候选: "
+                                f"AstrBot: Embedding Provider ID '{embedding_provider_id}' 匹配到多个候选："
                                 + ", ".join(p.meta().id for p in candidates)
                             )
                         else:
@@ -1065,6 +1091,7 @@ if Star is not None:
                             "multi_page_mode", "cover_link"
                         ),
                         use_pixiv_cat=self._use_pixiv_cat,
+                        proxy_url=config.get("network", {}).get("proxy_url"),
                     )
                 ]
 

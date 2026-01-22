@@ -7,8 +7,7 @@
 1. 在 AstrBot 插件配置中填写以下内容：
    - `pixiv.refresh_token` 和 `pixiv.user_id`
    - 设置主动推送会话：
-     - 推荐直接填写 `push_sessions`（umo 列表）
-     - 或填写 `platform_name` + `target_groups` / `target_users` 自动生成
+     - 填写 `push_sessions`（umo 列表）
    - 如需复用 AstrBot 已配置的 LLM/Embedding Provider：
      - 打开 `use_astrbot_providers`
      - 填写 `chat_provider_id` 与 `embedding_provider_id`（由用户自行选择 Provider ID）

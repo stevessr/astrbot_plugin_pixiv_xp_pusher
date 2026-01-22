@@ -40,22 +40,6 @@
     "hint": "格式示例：default:GroupMessage:123456 或 default:PrivateMessage:123456",
     "default": []
   },
-  "platform_name": {
-    "description": "平台名称（用于自动生成会话）",
-    "type": "string",
-    "default": "default",
-    "hint": "在 AstrBot WebUI 的机器人配置中填写的名称"
-  },
-  "target_groups": {
-    "description": "推送群号列表（为空则不推送群）",
-    "type": "list",
-    "default": []
-  },
-  "target_users": {
-    "description": "推送私聊用户列表（为空则不推送私聊）",
-    "type": "list",
-    "default": []
-  },
   "strategies": {
     "description": "启用的策略列表",
     "type": "list",
