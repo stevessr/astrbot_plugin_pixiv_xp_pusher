@@ -8,9 +8,7 @@
    - `pixiv.refresh_token` 和 `pixiv.user_id`
    - 设置主动推送会话：
      - 填写 `push_sessions`（umo 列表）
-   - 如需复用 AstrBot 已配置的 LLM/Embedding Provider：
-     - 打开 `use_astrbot_providers`
-     - 填写 `chat_provider_id` 与 `embedding_provider_id`（由用户自行选择 Provider ID）
+   - 如需启用 Embedding/AI 精排，请在 `ai.embedding` / `ai.scorer` 中填写 `provider/api_key/base_url/model`
 2. 启动插件：`/pixivxp start`
 
 ## 常用指令

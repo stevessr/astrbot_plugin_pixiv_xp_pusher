@@ -54,11 +54,9 @@ TAG_ALIASES = {
 class AITagProcessor:
     """AI Tag 处理器 - 过滤无意义 tag 和归类同义 tag"""
 
-    def __init__(self, config: dict, provider=None):
-        self._provider = provider
-        self.enabled = config.get("enabled", False) and (
-            HAS_OPENAI or provider is not None
-        )
+    def __init__(self, config: dict):
+        self._provider = None
+        self.enabled = config.get("enabled", False) and HAS_OPENAI
         self.filter_meaningless = config.get("filter_meaningless", True)
         self.merge_synonyms = config.get("merge_synonyms", True)
         self.model = config.get("model", "gpt-4o-mini")
@@ -66,7 +64,7 @@ class AITagProcessor:
         self.concurrency = config.get("concurrency", 3)  # 并发数
         self.pattern_users = re.compile(r"^(.*?)\d+users 入り$")  # 预编译正则
 
-        if self.enabled and self._provider is None:
+        if self.enabled:
             self.client = AsyncOpenAI(
                 api_key=config.get("api_key", ""),
                 base_url=config.get("base_url") or None,
@@ -371,13 +369,12 @@ class XPProfiler:
         time_decay_days: int = 180,
         ai_config: dict | None = None,
         saturation_threshold: float = 0.5,
-        ai_provider=None,
     ):
         self.client = client
         self.stop_words = set(stop_words or [])
         self.discovery_rate = discovery_rate
         self.time_decay_days = time_decay_days
-        self.ai_processor = AITagProcessor(ai_config or {}, provider=ai_provider)
+        self.ai_processor = AITagProcessor(ai_config or {})
         self.saturation_threshold = saturation_threshold  # 高频 Tag 饱和度阈值
         self._blocked_artist_ids: set[int] = set()  # 初始化，由 load_blacklist 填充
 

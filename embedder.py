@@ -60,7 +60,7 @@ class Embedder:
     3. 相似度计算 (余弦相似度)
     """
 
-    def __init__(self, config: dict, embedding_provider=None):
+    def __init__(self, config: dict):
         """
         初始化 Embedder
 
@@ -76,21 +76,6 @@ class Embedder:
 
         self._client = None
         self._local_model = None
-        self._astrbot_provider = embedding_provider
-
-        if self._astrbot_provider is not None:
-            if not self.enabled:
-                return
-            self.provider = "astrbot"
-            try:
-                if hasattr(self._astrbot_provider, "get_dim"):
-                    self.dimensions = int(
-                        config.get("dimensions") or self._astrbot_provider.get_dim()
-                    )
-            except Exception as e:
-                logger.warning(f"读取 Embedding 维度失败：{e}")
-            logger.info("Embedder 已绑定 AstrBot Embedding Provider")
-            return
 
         if not self.enabled:
             return
@@ -144,9 +129,6 @@ class Embedder:
             return None
 
         try:
-            if self.provider == "astrbot":
-                return await self._astrbot_provider.get_embedding(text)
-
             if self.provider == "openai":
                 response = await self._client.embeddings.create(
                     model=self.model, input=text, dimensions=self.dimensions
@@ -210,9 +192,6 @@ class Embedder:
             return [None] * len(texts)
 
         try:
-            if self.provider == "astrbot":
-                return await self._astrbot_provider.get_embeddings(texts)
-
             if self.provider == "openai":
                 response = await self._client.embeddings.create(
                     model=self.model, input=texts, dimensions=self.dimensions

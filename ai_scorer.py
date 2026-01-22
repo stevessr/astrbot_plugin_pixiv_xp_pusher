@@ -60,7 +60,7 @@ class AIScorer:
 返回 JSON 数组，格式：[{{"id": 123, "score": 0.85}}]
 只返回 JSON，不要解释。根据标签与用户偏好的匹配程度评分。"""
 
-    def __init__(self, config: dict, provider=None):
+    def __init__(self, config: dict):
         """
         初始化 AI 评分器
 
@@ -74,13 +74,7 @@ class AIScorer:
         self.score_weight = config.get("score_weight", 0.3)
 
         self._client = None
-        self._provider = provider
-
         if not self.enabled:
-            return
-
-        if self._provider is not None:
-            logger.info("AI Scorer 已绑定 AstrBot LLM Provider")
             return
 
         if not HAS_OPENAI:
@@ -153,23 +147,14 @@ class AIScorer:
             )
 
             # 调用 LLM
-            if self._provider is not None:
-                resp = await self._provider.text_chat(
-                    prompt=prompt,
-                    model=self.model,
-                    temperature=0.3,
-                    max_tokens=1000,
-                )
-                content = (resp.completion_text or "").strip()
-            else:
-                response = await self._client.chat.completions.create(
-                    model=self.model,
-                    messages=[{"role": "user", "content": prompt}],
-                    temperature=0.3,
-                    max_tokens=1000,
-                )
+            response = await self._client.chat.completions.create(
+                model=self.model,
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.3,
+                max_tokens=1000,
+            )
 
-                content = response.choices[0].message.content.strip()
+            content = response.choices[0].message.content.strip()
 
             # 解析 JSON
             # 尝试提取 JSON 数组

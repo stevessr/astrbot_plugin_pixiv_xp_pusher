@@ -19,21 +19,6 @@
     "type": "bool",
     "default": true
   },
-  "use_astrbot_providers": {
-    "description": "使用 AstrBot 预配置的 LLM/Embedding Provider",
-    "type": "bool",
-    "default": false
-  },
-  "chat_provider_id": {
-    "description": "LLM Provider ID（用于 AI 标签清洗/精排）",
-    "type": "string",
-    "default": ""
-  },
-  "embedding_provider_id": {
-    "description": "Embedding Provider ID",
-    "type": "string",
-    "default": ""
-  },
   "push_sessions": {
     "description": "主动推送会话（umo 列表）",
     "type": "list",
@@ -57,6 +42,26 @@
             "description": "启用 Embedding",
             "type": "bool",
             "default": false
+          },
+          "provider": {
+            "description": "Embedding Provider（openai/local）",
+            "type": "string",
+            "default": "openai"
+          },
+          "model": {
+            "description": "Embedding 模型名（OpenAI 或本地模型名）",
+            "type": "string",
+            "default": "text-embedding-3-small"
+          },
+          "api_key": {
+            "description": "Embedding API Key",
+            "type": "string",
+            "default": ""
+          },
+          "base_url": {
+            "description": "Embedding API Base URL",
+            "type": "string",
+            "default": ""
           },
           "dimensions": {
             "description": "向量维度",
@@ -83,6 +88,26 @@
             "description": "启用精排评分",
             "type": "bool",
             "default": false
+          },
+          "provider": {
+            "description": "LLM Provider（openai 等兼容 API）",
+            "type": "string",
+            "default": "openai"
+          },
+          "model": {
+            "description": "LLM 模型名",
+            "type": "string",
+            "default": "gpt-4o-mini"
+          },
+          "api_key": {
+            "description": "LLM API Key",
+            "type": "string",
+            "default": ""
+          },
+          "base_url": {
+            "description": "LLM API Base URL",
+            "type": "string",
+            "default": ""
           },
           "max_candidates": {
             "description": "最大候选数量",
