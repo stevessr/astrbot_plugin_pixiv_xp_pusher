@@ -1374,14 +1374,14 @@ async def get_bookmark_count(user_id: int = None) -> int:
         return row[0] if row else 0
 
 
-# ============ 批量消息映射 (Telegraph 模式) ============
+# ============ 批量消息映射 (批量推送模式) ============
 async def save_batch_mapping(message_id: int, chat_id: str, illusts: list):
     """
     保存批量消息与作品的映射关系
     
     Args:
-        message_id: Telegram 消息 ID
-        chat_id: 聊天 ID
+        message_id: 消息 ID
+        chat_id: 会话 ID
         illusts: 作品列表 (需要有 .id 属性)
     """
     async with aiosqlite.connect(DB_PATH) as db:
@@ -1400,8 +1400,8 @@ async def get_batch_illust_id(message_id: int, chat_id: str, index: int) -> int 
     根据消息 ID 和编号获取作品 ID
     
     Args:
-        message_id: Telegram 消息 ID
-        chat_id: 聊天 ID
+        message_id: 消息 ID
+        chat_id: 会话 ID
         index: 作品编号 (1-based)
     
     Returns:

@@ -15,9 +15,6 @@ from pixiv_client import PixivClient
 from profiler import XPProfiler
 from fetcher import ContentFetcher
 from filter import ContentFilter
-from notifier.telegram import TelegramNotifier
-from notifier.onebot import OneBotNotifier
-from notifier.base import BaseNotifier
 from utils import get_pixiv_cat_url
 from utils import setup_logging
 
@@ -71,374 +68,7 @@ async def retry_async(coro_func, *args, max_retries: int = 3, delay: float = 5.0
 _task_lock = asyncio.Lock()
 
 async def setup_notifiers(config: dict, client: PixivClient, profiler: XPProfiler, sync_client: PixivClient = None):
-    """创建并配置推送器（支持多推送渠道）"""
-    # sync_client 用于 on_action 回调中的 main_task 调用
-    if sync_client is None:
-        sync_client = client
-    notifier_cfg = config.get("notifier", {})
-    # 支持单个 type 字符串或 types 列表
-    notifier_types = notifier_cfg.get("types") or [notifier_cfg.get("type", "telegram")]
-    if isinstance(notifier_types, str):
-        notifier_types = [notifier_types]
-    
-    # 延迟引用避免因为 notifiers 列表未初始化完成导致的问题
-    # 但 on_feedback 需要访问 notifiers 列表
-    # 我们可以把 notifiers 定义在外部列表，然后引用它
-    notifiers_list = []
-    max_pages = notifier_cfg.get("max_pages", 10)
-
-    async def push_related_task(seed_illust, parent_msg_id: int = None, current_depth: int = 1):
-        """
-        异步：推送关联作品
-        
-        Args:
-            seed_illust: 触发连锁的作品
-            parent_msg_id: 父消息 ID（用于回复形成消息链）
-            current_depth: 当前连锁深度（从 1 开始）
-        """
-        try:
-            logger.info(f"🔗 触发连锁反应 (深度={current_depth}): 正在获取 {seed_illust.id} 的关联作品...")
-            # 1. 获取关联
-            related = await client.get_related_illusts(seed_illust.id, limit=20)
-            if not related:
-                logger.info(f"🔗 作品 {seed_illust.id} 无关联推荐，连锁结束")
-                return
-
-            # 2. 过滤 (复用 ContentFilter 逻辑，但简化参数)
-            from filter import ContentFilter
-            # 临时构造 filter 配置
-            filter_cfg = config.get("filter", {})
-            c_filter = ContentFilter(
-                blacklist_tags=list(profiler.stop_words), # 使用实时黑名单
-                exclude_ai=filter_cfg.get("exclude_ai", True),
-                r18_mode=filter_cfg.get("r18_mode", False),
-                min_create_days=filter_cfg.get("min_create_days", 0)
-            )
-            
-            # 使用简单的过滤逻辑 (不去重 SENT_HISTORY，因为这是用户主动要求的)
-            # 但我们要去重 "已收藏" 和 "画师屏蔽"
-            filtered = []
-            import database as db_mod
-            xp_profile = await db_mod.get_xp_profile()
-            
-            for ill in related:
-                # 严格去重 (ID 类型统一)
-                if int(ill.id) == int(seed_illust.id): continue
-
-                # 过滤已推送过的作品 (响应用户需求: 不推老图)
-                if await db_mod.is_pushed(ill.id):
-                    logger.debug(f"🔗 作品 {ill.id} 已推送过，跳过推荐")
-                    continue
-                # 检查屏蔽
-                if not c_filter.check_illust(ill): continue
-                if ill.user_id in profiler._blocked_artist_ids: continue
-                
-                # 计算分数
-                score = 0
-                for t in ill.tags:
-                     norm = t.lower().replace(" ", "_")
-                     if norm in xp_profile: score += xp_profile[norm]
-                
-                # Artist Boost
-                artist_score = await db_mod.get_artist_score(ill.user_id)
-                score += artist_score
-                
-                filtered.append((ill, score))
-            
-            # 排序取前 N
-            filtered.sort(key=lambda x: x[1], reverse=True)
-            
-            push_limit = config.get("feedback", {}).get("related_push_limit", 1)
-            top_results = [x[0] for x in filtered[:push_limit]]
-            
-            if top_results:
-                # 构建消息前缀（包含源作品信息）
-                source_title = getattr(seed_illust, 'title', f'#{seed_illust.id}')
-                message_prefix = f"🔗 连锁推荐 (源自: {source_title})"
-                
-                logger.info(f"🔗 连锁推送: {len(top_results)} 个关联作品")
-                for n in notifiers_list:
-                    if hasattr(n, 'push_illusts'):
-                        # 使用 push_illusts 带回复功能
-                        sent_map = await n.push_illusts(
-                            top_results, 
-                            message_prefix=message_prefix,
-                            reply_to_message_id=parent_msg_id
-                        )
-                        
-                        # 缓存连锁作品信息（包含链深度）
-                        for ill in top_results:
-                            # 获取该作品对应的消息 ID
-                            msg_id = sent_map.get(ill.id)
-                            # 缓存作品信息 + 链元数据
-                            await db_mod.cache_illust(
-                                illust_id=ill.id,
-                                tags=ill.tags,
-                                user_id=ill.user_id,
-                                user_name=ill.user_name,
-                                source='related',  # 连锁推送来源
-                                chain_depth=current_depth,
-                                chain_parent_id=seed_illust.id,
-                                chain_msg_id=msg_id
-                            )
-                            # 记录推送来源
-                            await db_mod.mark_pushed(ill.id, 'related')
-            else:
-                logger.info("🔗 关联作品过滤后为空")
-
-        except Exception as e:
-            logger.error(f"连锁推送失败: {e}")
-
-    async def on_feedback(illust_id: int, action: str):
-        """反馈回调 (优化版：使用缓存避免 API 调用)"""
-        illust = None
-        
-        # 1. 尝试从缓存获取
-        cached = await get_cached_illust(illust_id)
-        if cached:
-            from pixiv_client import Illust
-            from datetime import datetime
-            illust = Illust(
-                id=cached["id"],
-                title="",
-                user_id=cached.get("user_id", 0),
-                user_name=cached.get("user_name", ""),
-                tags=cached.get("tags", []),
-                bookmark_count=0,
-                view_count=0,
-                page_count=1,
-                image_urls=[],
-                is_r18=False,
-                ai_type=0,
-                create_date=datetime.now()
-            )
-            # 是否需要完整信息（如点赞时不知道画家ID）
-            if (action in ("like", "1") and illust.user_id == 0):
-                try:
-                    full = await client.get_illust_detail(illust_id)
-                    if full: illust = full
-                except Exception as e:
-                    logger.warning(f"补充详情失败: {e}")
-        
-        # 2. 缓存未命中，回退到 API
-        if not illust:
-            logger.warning(f"未找到作品缓存: {illust_id}，尝试从 API 获取...")
-            try:
-                illust = await client.get_illust_detail(illust_id)
-                if illust:
-                    # 补充写入缓存
-                    await cache_illust(illust.id, illust.tags, illust.user_id, illust.user_name)
-                    logger.info(f"API 获取成功并已缓存: {illust.title}")
-            except Exception as e:
-                logger.error(f"API 回退获取失败: {e}")
-        
-        if not illust:
-            logger.error(f"无法获取作品信息: {illust_id}，反馈处理中止")
-            return
-
-        # 3. 执行核心反馈逻辑
-        suggested_block_tag = await profiler.apply_feedback(
-            illust=illust,
-            action=action,
-            config=config.get("feedback", {})
-        )
-        
-        # 如果 profiler 建议屏蔽
-        if suggested_block_tag:
-             msg = f"🚫 Tag `{suggested_block_tag}` 累计不喜欢已达阈值。\n是否屏蔽？\n发送 `/block {suggested_block_tag}` 确认屏蔽。"
-             for n in notifiers_list:
-                 if hasattr(n, 'send_text'):
-                     await n.send_text(msg)
-        
-        # 如果是"喜欢"，同步添加到 Pixiv 收藏
-        if action in ("like", "1"):
-             try:
-                 await sync_client.add_bookmark(illust_id)
-                 
-                 # 更新 MAB 策略反馈 (排除连锁推荐，连锁只计入 Tag 统计)
-                 from database import get_push_source, update_strategy_stats
-                 source = await get_push_source(illust_id)
-                 if source and source != 'related':
-                     await update_strategy_stats(source, is_success=True)
-                     logger.info(f"MAB策略 '{source}' 获得正反馈")
-                
-                 # === Chain Reaction Logic (Per-Image Depth) ===
-                 if "related" in config.get("strategies", ["related"]):
-                     max_depth = config.get("feedback", {}).get("max_chain_depth", 3)
-                     
-                     # 从缓存中获取当前作品的链深度和消息 ID
-                     chain_depth = cached.get("chain_depth", 0) if cached else 0
-                     chain_msg_id = cached.get("chain_msg_id") if cached else None
-                     
-                     # Fallback: 从 notifier 的消息映射中查找（用于非连锁推送的原图）
-                     if chain_msg_id is None:
-                         for n in notifiers_list:
-                             if hasattr(n, '_message_illust_map'):
-                                 # 反查：illust_id -> message_id
-                                 for msg_id, ill_id in n._message_illust_map.items():
-                                     if ill_id == illust_id:
-                                         chain_msg_id = msg_id
-                                         break
-                             if chain_msg_id:
-                                 break
-                     
-                     # 如果深度未超限，触发新一层连锁
-                     next_depth = chain_depth + 1
-                     if next_depth <= max_depth:
-                         logger.info(f"🔗 触发连锁 (当前深度={chain_depth}, 下一层={next_depth})")
-                         asyncio.create_task(push_related_task(
-                             illust, 
-                             parent_msg_id=chain_msg_id,
-                             current_depth=next_depth
-                         ))
-                     else:
-                         logger.info(f"🔗 作品 {illust_id} 连锁深度已达上限 ({chain_depth}/{max_depth})，跳过")
-                     
-             except Exception as e:
-                 logger.error(f"同步收藏/连锁处理失败: {e}")
-        
-        logger.info(f"反馈处理完成: illust_id={illust_id}, action={action}")
-    
-    # ... (rest of setup_notifiers) ...
-
-            
-    async def on_action(action: str, data: any):
-        """通用动作回调"""
-        if action == "retry_ai":
-            error_id = int(data)
-            logger.info(f"收到重试请求: error_id={error_id}")
-            
-            try:
-                from database import get_ai_error, update_ai_error_status
-                import json
-                
-                # 1. 获取错误记录
-                error_record = await get_ai_error(error_id)
-                if not error_record:
-                    logger.error("错误记录不存在")
-                    return
-                
-                if error_record["status"] == "resolved":
-                    logger.info("该错误已修复")
-                    return
-
-                tags = json.loads(error_record["tags_content"])
-                
-                # 2. 重新尝试 AI 处理
-                logger.info(f"正在重试 AI 处理 {len(tags)} 个标签...")
-                valid, mapping = await profiler.ai_processor.process_tags(tags)
-                
-                await update_ai_error_status(error_id, "resolved")
-                
-                # 通知用户（使用第一个可用的 notifier）
-                msg = f"✅ 修复成功！\n已验证 AI 配置可用。\n({len(tags)} 个标签已正确处理)"
-                for n in notifiers:
-                    if hasattr(n, 'send_text'):
-                        await n.send_text(msg)
-                        break
-                
-            except Exception as e:
-                logger.error(f"重试失败: {e}")
-        
-        elif action == "run_task":
-             # 手动触发推送任务
-             logger.info("🤖 收到 Bot 手动推送指令")
-             # 确保 config, client, profiler, notifiers 可用
-             # 这里是一个闭包，可以直接访问外部变量
-             # 使用 create_task 异步执行，避免阻塞 Bot 响应
-             asyncio.create_task(main_task(config, client, profiler, notifiers, sync_client))
-             
-        elif action == "update_schedule":
-            # 更新调度计划 (支持多个时间)
-            schedule_str = str(data)
-            logger.info(f"📅 收到调度更新请求: {schedule_str}")
-            try:
-                # 1. 持久化
-                from database import set_state
-                await set_state("schedule_cron", schedule_str)
-                
-                # 2. 如果 scheduler 实例存在，重新调度
-                if 'scheduler' in config:
-                    sched = config['scheduler']
-                    
-                    # 移除所有旧的 push_job
-                    for job in sched.get_jobs():
-                        if job.id.startswith('push_job'):
-                            sched.remove_job(job.id)
-                    
-                    # 添加新的任务
-                    cron_list = [c.strip() for c in schedule_str.split(",") if c.strip()]
-                    for i, cron_expr in enumerate(cron_list):
-                        try:
-                            sched.add_job(
-                                main_task, 
-                                CronTrigger.from_crontab(cron_expr),
-                                args=[config, client, profiler, notifiers, sync_client],
-                                id=f'push_job_{i}'
-                            )
-                        except Exception as e:
-                            logger.error(f"添加任务失败 ({cron_expr}): {e}")
-                    
-                    logger.info(f"✅ 调度任务已更新，共 {len(cron_list)} 个时间点")
-            except Exception as e:
-                logger.error(f"更新调度失败: {e}")
-    
-    notifiers = []
-    
-    if "telegram" in notifier_types:
-        tg_cfg = notifier_cfg.get("telegram", {})
-        # 支持旧配置 chat_id 或新配置 chat_ids
-        chat_ids = tg_cfg.get("chat_ids") or tg_cfg.get("chat_id")
-        if tg_cfg.get("bot_token") and chat_ids:
-            notifiers.append(TelegramNotifier(
-                bot_token=tg_cfg["bot_token"],
-                chat_ids=chat_ids,
-                client=client,
-                multi_page_mode=notifier_cfg.get("multi_page_mode", "cover_link"),
-                allowed_users=tg_cfg.get("allowed_users"),
-                thread_id=tg_cfg.get("thread_id"),
-                on_feedback=on_feedback,
-                on_action=on_action,
-                proxy_url=tg_cfg.get("proxy_url"),
-                max_pages=max_pages,
-                image_quality=tg_cfg.get("image_quality", 85),
-                max_image_size=tg_cfg.get("max_image_size", 2000),
-                topic_rules=tg_cfg.get("topic_rules"),
-                topic_tag_mapping=tg_cfg.get("topic_tag_mapping"),
-                # 批量模式配置
-                batch_mode=tg_cfg.get("batch_mode", "single"),
-                batch_show_title=tg_cfg.get("batch_show_title", True),
-                batch_show_artist=tg_cfg.get("batch_show_artist", True),
-                batch_show_tags=tg_cfg.get("batch_show_tags", True),
-            ))
-            logger.info("已启用 Telegram 推送")
-    
-    if "onebot" in notifier_types:
-        ob_cfg = notifier_cfg.get("onebot", {})
-        if ob_cfg.get("ws_url"):
-            ob_notifier = OneBotNotifier(
-                ws_url=ob_cfg["ws_url"],
-                private_id=ob_cfg.get("private_id"),
-                group_id=ob_cfg.get("group_id"),
-                push_to_private=ob_cfg.get("push_to_private", True),
-                push_to_group=ob_cfg.get("push_to_group", False),
-                master_id=ob_cfg.get("master_id"),
-                on_feedback=on_feedback,
-                on_action=on_action,
-                client=client,
-                max_pages=max_pages
-            )
-            try:
-                await ob_notifier.connect()
-                notifiers.append(ob_notifier)
-                logger.info("已启用 OneBot 推送")
-            except Exception as e:
-                logger.error(f"OneBot 连接失败: {e}")
-    
-    # 将创建的 notifiers 填充到 notifiers_list (供 push_related_task 等闭包使用)
-    notifiers_list.extend(notifiers)
-    
-    return notifiers if notifiers else None
+    raise RuntimeError("Non-AstrBot notifiers have been removed; use notifiers_factory.")
 
 
 async def setup_services(config: dict, notifiers_factory=None):
@@ -448,7 +78,7 @@ async def setup_services(config: dict, notifiers_factory=None):
     # 公共网络配置
     network_cfg = config.get("network", {})
     pixiv_cfg = config.get("pixiv", {})
-    proxy_url = config.get("notifier", {}).get("telegram", {}).get("proxy_url")
+    proxy_url = network_cfg.get("proxy_url")
     
     client_kwargs = {
         "requests_per_minute": network_cfg.get("requests_per_minute", 60),
@@ -722,13 +352,7 @@ async def run_once(config: dict, notifiers_factory=None):
         config, notifiers_factory=notifiers_factory
     )
     
-    # 即使是 Run Once，如果用于测试，可能也需要 Feedback?
-    # 但 cli --once 通常是脚本调用，跑完即走。
-    # 这里我们还是启动监听 (如果是 Test 模式也许不需要?)
-    # 如果是 --test, 我们不启动监听? 
-    # 如果用户想测试反馈，OneBot/TG 需要跑。
-    # 但 script ends immediately. Feedback needs loop.
-    # 所以 --once 真的就是 "Fire and Forget".
+    # Run-once 是 Fire-and-Forget 行为
     
     try:
         await main_task(config, main_client, profiler, notifiers, sync_client)
@@ -865,22 +489,8 @@ async def run_scheduler(config: dict, run_immediately: bool = False, notifiers_f
         config, notifiers_factory=notifiers_factory
     )
     
-    # Start Listeners (Background)
-    if notifiers:
-        for n in notifiers:
-            if isinstance(n, TelegramNotifier):
-                 # TelegramNotifier.start_polling is async but handles its own background tasks (updater.start_polling)
-                 await n.start_polling()
-            elif isinstance(n, OneBotNotifier):
-                 # OneBot loop needs to be scheduled
-                 asyncio.create_task(n.start_listening())
-    
     if run_immediately:
         logger.info("🚀 正在立即执行首次任务...")
-        # Run main_task as a background task so it doesn't block scheduler start?
-        # Or await it? Since it's "Now", usually await is fine, or create task to allow listener to process concurrently?
-        # If we await, listener logic (OneBot) runs in background task ok.
-        # BUT if main_task crashes, we still want scheduler.
         asyncio.create_task(main_task(config, main_client, profiler, notifiers, sync_client))
 
     scheduler = AsyncIOScheduler()
@@ -962,33 +572,6 @@ async def run_scheduler(config: dict, run_immediately: bool = False, notifiers_f
     try:
         while True:
             await asyncio.sleep(1800)  # 每 30 分钟检查一次
-
-            # Telegram 连接健康检查
-            for n in notifiers:
-                if isinstance(n, TelegramNotifier):
-                    need_restart = False
-
-                    # 检查 _app 是否存在且 updater 是否在运行
-                    if not n._app or not n._app.updater or not n._app.updater.running:
-                        logger.warning("Telegram updater 未运行，需要重启...")
-                        need_restart = True
-                    else:
-                        # updater 在运行，检查实际连接
-                        try:
-                            await n._app.bot.get_me()
-                            logger.debug("Telegram 连接健康检查通过")
-                        except Exception as e:
-                            logger.warning(f"Telegram 健康检查失败: {e}，需要重启轮询...")
-                            need_restart = True
-
-                    if need_restart:
-                        try:
-                            await n.stop_polling()
-                            await asyncio.sleep(5)
-                            await n.start_polling()
-                            logger.info("✅ Telegram 轮询已重启")
-                        except Exception as restart_err:
-                            logger.error(f"重启 Telegram 轮询失败: {restart_err}")
     except (KeyboardInterrupt, SystemExit, asyncio.CancelledError):
         scheduler.shutdown()
         raise
@@ -1137,7 +720,7 @@ def _build_push_sessions(plugin_cfg: "AstrBotConfig") -> list[str]:
     return sessions
 
 
-class AstrBotNotifier(BaseNotifier):
+class AstrBotNotifier:
     """Send Pixiv messages through AstrBot's builtin proactive channels."""
 
     def __init__(
@@ -1414,4 +997,3 @@ if Star is not None:
             await self._stop_scheduler()
             started, message = await self._start_scheduler()
             yield event.plain_result(message)
-
