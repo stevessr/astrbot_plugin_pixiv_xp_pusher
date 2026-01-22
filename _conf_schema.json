@@ -127,7 +127,7 @@
             "condition": {
               "ai.scorer.enabled": true
             },
-            "default": "gpt-4o-mini"
+            "default": ""
           },
           "api_key": {
             "description": "LLM API Key",
@@ -428,7 +428,7 @@
           "model": {
             "description": "模型名称",
             "type": "string",
-            "default": "gpt-4o-mini",
+            "default": "",
             "condition": {
               "enabled": true
             }

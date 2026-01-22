@@ -33,7 +33,7 @@ class AIScoreConfig:
 
     enabled: bool = False
     provider: str = "openai"
-    model: str = "gpt-4o-mini"
+    model: str = ""
     api_key: str = ""
     base_url: str = ""
     max_candidates: int = 50  # 超过此数量时跳过 AI 评分
@@ -69,7 +69,7 @@ class AIScorer:
         """
         self.enabled = config.get("enabled", False)
         self.provider = config.get("provider", "openai")
-        self.model = config.get("model", "gpt-4o-mini")
+        self.model = config.get("model") or ""
         self.max_candidates = config.get("max_candidates", 50)
         self.score_weight = config.get("score_weight", 0.3)
 
@@ -79,6 +79,11 @@ class AIScorer:
 
         if not HAS_OPENAI:
             logger.error("openai 库未安装，AI 评分功能将不可用")
+            self.enabled = False
+            return
+
+        if not self.model:
+            logger.warning("未配置 AI Scorer model，功能已禁用")
             self.enabled = False
             return
 

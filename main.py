@@ -283,7 +283,7 @@ async def main_task(
                         "base_url": scorer_cfg.get("base_url")
                         or profiler_ai_cfg.get("base_url", ""),
                         "model": scorer_cfg.get("model")
-                        or profiler_ai_cfg.get("model", "gpt-4o-mini"),
+                        or profiler_ai_cfg.get("model", ""),
                         "max_candidates": scorer_cfg.get("max_candidates", 50),
                         "score_weight": scorer_cfg.get("score_weight", 0.3),
                     }
@@ -725,7 +725,7 @@ def _build_config_from_astrbot(plugin_cfg: "AstrBotConfig") -> dict:
                 "provider": profiler_ai_cfg.get("provider", "openai"),
                 "api_key": profiler_ai_cfg.get("api_key", ""),
                 "base_url": profiler_ai_cfg.get("base_url", ""),
-                "model": profiler_ai_cfg.get("model", "gpt-4o-mini"),
+                "model": profiler_ai_cfg.get("model", ""),
                 "concurrency": profiler_ai_cfg.get("concurrency", 10),
                 "batch_size": profiler_ai_cfg.get("batch_size", 200),
                 "filter_meaningless": profiler_ai_cfg.get("filter_meaningless", True),
@@ -880,7 +880,13 @@ class AstrBotNotifier:
             data = await download_image_with_referer(session, url, proxy=self.proxy_url)
             return save_temp_img(data)
         except Exception as e:
-            logger.warning(f"下载图片失败：{e}")
+            logger.warning(
+                "下载图片失败：url=%s proxy=%s err=%s",
+                url,
+                self.proxy_url,
+                e,
+                exc_info=True,
+            )
             return None
 
     async def _send_text_and_get_reply_id(
@@ -1066,7 +1072,6 @@ if Star is not None:
                 self.plugin_config.get("run_immediately", False)
             )
             self._test_mode = bool(self.plugin_config.get("test_mode", False))
-            self._use_pixiv_cat = bool(self.plugin_config.get("use_pixiv_cat", True))
 
         async def initialize(self):
             if self._auto_start:
@@ -1099,6 +1104,7 @@ if Star is not None:
             sessions = _build_push_sessions(self.plugin_config)
             if not sessions:
                 return False, "No push sessions configured."
+            use_pixiv_cat = bool(self.plugin_config.get("use_pixiv_cat", True))
 
             async def _notifier_factory(_, __, ___, ____):
                 return [
@@ -1109,7 +1115,7 @@ if Star is not None:
                         multi_page_mode=config.get("notifier", {}).get(
                             "multi_page_mode", "cover_link"
                         ),
-                        use_pixiv_cat=self._use_pixiv_cat,
+                        use_pixiv_cat=use_pixiv_cat,
                         proxy_url=config.get("network", {}).get("proxy_url"),
                     )
                 ]
@@ -1160,6 +1166,7 @@ if Star is not None:
             sessions = _build_push_sessions(self.plugin_config)
             if not sessions:
                 return False, "No push sessions configured."
+            use_pixiv_cat = bool(self.plugin_config.get("use_pixiv_cat", True))
 
             async def _notifier_factory(_, __, ___, ____):
                 return [
@@ -1170,7 +1177,8 @@ if Star is not None:
                         multi_page_mode=config.get("notifier", {}).get(
                             "multi_page_mode", "cover_link"
                         ),
-                        use_pixiv_cat=self._use_pixiv_cat,
+                        use_pixiv_cat=use_pixiv_cat,
+                        proxy_url=config.get("network", {}).get("proxy_url"),
                     )
                 ]
 

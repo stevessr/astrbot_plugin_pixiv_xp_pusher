@@ -59,10 +59,14 @@ class AITagProcessor:
         self.enabled = config.get("enabled", False) and HAS_OPENAI
         self.filter_meaningless = config.get("filter_meaningless", True)
         self.merge_synonyms = config.get("merge_synonyms", True)
-        self.model = config.get("model", "gpt-4o-mini")
+        self.model = config.get("model") or ""
         self.batch_size = config.get("batch_size", 50)
         self.concurrency = config.get("concurrency", 3)  # 并发数
         self.pattern_users = re.compile(r"^(.*?)\d+users 入り$")  # 预编译正则
+
+        if self.enabled and not self.model:
+            logger.warning("未配置 Profiler AI model，功能已禁用")
+            self.enabled = False
 
         if self.enabled:
             self.client = AsyncOpenAI(

@@ -211,7 +211,25 @@ class Embedder:
                 return embeddings
 
         except Exception as e:
-            logger.error(f"批量 Embedding 失败：{e}")
+            try:
+                lengths = [len(t) for t in texts]
+                sample = texts[0][:200] if texts else ""
+                logger.error(
+                    "批量 Embedding 失败：%s | provider=%s model=%s batch=%d "
+                    "len(min/avg/max)=%s sample=%s",
+                    e,
+                    self.provider,
+                    self.model,
+                    len(texts),
+                    (
+                        f"{min(lengths) if lengths else 0}/"
+                        f"{(sum(lengths)//len(lengths)) if lengths else 0}/"
+                        f"{max(lengths) if lengths else 0}"
+                    ),
+                    sample,
+                )
+            except Exception:
+                logger.error(f"批量 Embedding 失败：{e}")
             return [None] * len(texts)
 
     @staticmethod
