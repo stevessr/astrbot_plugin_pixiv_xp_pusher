@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import os
 import sys
+from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -1189,6 +1190,40 @@ if Star is not None:
             asyncio.create_task(_run())
             return True, "Run-once task started."
 
+        async def _send_test_push(self) -> tuple[bool, str]:
+            config = self._load_runtime_config()
+            if not config:
+                return False, "未找到可用配置，请先完成插件配置。"
+
+            sessions = _build_push_sessions(self.plugin_config)
+            if not sessions:
+                return False, "未配置 push_sessions，无法进行测试推送。"
+
+            use_pixiv_cat = bool(self.plugin_config.get("use_pixiv_cat", True))
+            notifier = AstrBotNotifier(
+                context=self.context,
+                sessions=sessions,
+                max_pages=config.get("notifier", {}).get("max_pages", 10),
+                multi_page_mode=config.get("notifier", {}).get(
+                    "multi_page_mode", "cover_link"
+                ),
+                use_pixiv_cat=use_pixiv_cat,
+                proxy_url=config.get("network", {}).get("proxy_url"),
+            )
+
+            now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            msg = (
+                "🧪 PixivXP 测试推送\n"
+                f"时间：{now_str}\n"
+                f"会话数：{len(sessions)}\n"
+                "说明：仅用于验证推送通道是否可用。"
+            )
+
+            ok = await notifier.send_text(msg)
+            if ok:
+                return True, "✅ 测试推送已发送，请在目标会话中确认收到。"
+            return False, "❌ 测试推送发送失败，请检查日志与会话配置。"
+
         @filter.command_group("pixivxp", alias={"pixiv", "xp"})
         def pixivxp(self):
             """Pixiv-XP-Pusher control group."""
@@ -1197,32 +1232,72 @@ if Star is not None:
         @pixivxp.command("status")
         async def status(self, event: AstrMessageEvent):
             running = bool(self._scheduler_task and not self._scheduler_task.done())
-            last_error = f" Last error: {self._last_error}" if self._last_error else ""
-            yield event.plain_result(
-                f"Pixiv-XP-Pusher status: {'running' if running else 'stopped'}.{last_error}"
+            config = self._load_runtime_config() or {}
+            cron = config.get("scheduler", {}).get("cron", "N/A")
+            sessions = _build_push_sessions(self.plugin_config)
+            status = "运行中" if running else "已停止"
+            msg = (
+                "📊 PixivXP 状态\n"
+                f"调度：{status}\n"
+                f"定时：{cron}\n"
+                f"推送会话：{len(sessions)}\n"
+                f"自动启动：{'是' if self._auto_start else '否'}\n"
+                f"立即执行：{'是' if self._run_immediately else '否'}\n"
+                f"测试模式：{'是' if self._test_mode else '否'}"
             )
+            if self._last_error:
+                msg += f"\n最近错误：{self._last_error}"
+            yield event.plain_result(msg)
 
         @filter.permission_type(filter.PermissionType.ADMIN)
         @pixivxp.command("start")
         async def start(self, event: AstrMessageEvent):
             started, message = await self._start_scheduler()
-            yield event.plain_result(message)
+            if not started:
+                yield event.plain_result(f"❌ 启动失败：{message}")
+                return
+            config = self._load_runtime_config() or {}
+            cron = config.get("scheduler", {}).get("cron", "N/A")
+            sessions = _build_push_sessions(self.plugin_config)
+            yield event.plain_result(
+                "✅ 定时任务已启动\n"
+                f"定时：{cron}\n"
+                f"推送会话：{len(sessions)}\n"
+                f"立即执行：{'是' if self._run_immediately else '否'}"
+            )
 
         @filter.permission_type(filter.PermissionType.ADMIN)
         @pixivxp.command("stop")
         async def stop(self, event: AstrMessageEvent):
             stopped, message = await self._stop_scheduler()
-            yield event.plain_result(message)
+            if not stopped:
+                yield event.plain_result(f"❌ 停止失败：{message}")
+                return
+            yield event.plain_result("🛑 定时任务已停止。")
 
         @filter.permission_type(filter.PermissionType.ADMIN)
         @pixivxp.command("once")
         async def once(self, event: AstrMessageEvent):
             ok, message = await self._run_once_background()
-            yield event.plain_result(message if ok else f"Run-once failed: {message}")
+            if not ok:
+                yield event.plain_result(f"❌ 一次性推送启动失败：{message}")
+                return
+            yield event.plain_result(
+                "🚀 已触发一次性推送任务\n提示：任务在后台执行，可查看日志确认进度。"
+            )
+
+        @filter.permission_type(filter.PermissionType.ADMIN)
+        @pixivxp.command("test")
+        async def test(self, event: AstrMessageEvent):
+            ok, message = await self._send_test_push()
+            yield event.plain_result(message)
 
         @filter.permission_type(filter.PermissionType.ADMIN)
         @pixivxp.command("reload")
         async def reload(self, event: AstrMessageEvent):
             await self._stop_scheduler()
             started, message = await self._start_scheduler()
-            yield event.plain_result(message)
+            if not started:
+                yield event.plain_result(f"❌ 重载失败：{message}")
+                return
+            yield event.plain_result("🔄 配置已重载，定时任务已重新启动。")
