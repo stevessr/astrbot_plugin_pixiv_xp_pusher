@@ -76,6 +76,26 @@ def _parse_search_tags(raw_tags: str) -> dict:
     }
 
 
+def _parse_search_query(raw_query: str) -> dict:
+    cleaned = (raw_query or "").strip()
+    lowered = cleaned.lower()
+    if lowered.startswith("and:") or lowered.startswith("tag:"):
+        _, tag_str = cleaned.split(":", 1)
+        tag_str = tag_str.strip()
+        parsed = _parse_search_tags(tag_str)
+        parsed["mode"] = "and"
+        return parsed
+
+    return {
+        "success": True,
+        "error_message": "",
+        "include_tags": [],
+        "exclude_tags": [],
+        "display_tags": cleaned,
+        "mode": "keyword",
+    }
+
+
 def _has_excluded_tags(illust: Illust, excluded_tags: list[str]) -> bool:
     if not excluded_tags:
         return False
@@ -1652,31 +1672,55 @@ if Star is not None:
                     yield event.plain_result("Pixiv 登录失败或未登录，无法搜索。")
                     return
 
-                tag_result = _parse_search_tags(raw_query)
-                if not tag_result["success"]:
-                    yield event.plain_result(tag_result["error_message"])
+                query_result = _parse_search_query(raw_query)
+                if not query_result["success"]:
+                    yield event.plain_result(query_result["error_message"])
                     return
 
-                include_tags = tag_result["include_tags"]
-                exclude_tags = tag_result["exclude_tags"]
+                mode = query_result.get("mode", "keyword")
+                include_tags = query_result["include_tags"]
+                exclude_tags = query_result["exclude_tags"]
 
-                illusts = await client.search_illusts(
-                    tags=include_tags,
-                    bookmark_threshold=bookmark_threshold,
-                    date_range_days=date_range_days,
-                    limit=search_limit,
-                    search_target="partial_match_for_tags",
-                    sort="date_desc",
-                )
-                if not illusts and date_range_days > 0:
+                if mode == "and":
                     illusts = await client.search_illusts(
                         tags=include_tags,
                         bookmark_threshold=bookmark_threshold,
-                        date_range_days=0,
+                        date_range_days=date_range_days,
+                        limit=search_limit,
+                        search_target="partial_match_for_tags",
+                        sort="date_desc",
+                    )
+                    if not illusts and date_range_days > 0:
+                        illusts = await client.search_illusts(
+                            tags=include_tags,
+                            bookmark_threshold=bookmark_threshold,
+                            date_range_days=0,
+                            limit=search_limit,
+                            search_target="title_and_caption",
+                            sort="date_desc",
+                        )
+                else:
+                    keyword = query_result.get("display_tags", "").strip()
+                    if not keyword:
+                        yield event.plain_result("用法：/pixivxp search <query>")
+                        return
+                    illusts = await client.search_illusts(
+                        tags=[keyword],
+                        bookmark_threshold=bookmark_threshold,
+                        date_range_days=date_range_days,
                         limit=search_limit,
                         search_target="title_and_caption",
                         sort="date_desc",
                     )
+                    if not illusts and date_range_days > 0:
+                        illusts = await client.search_illusts(
+                            tags=[keyword],
+                            bookmark_threshold=bookmark_threshold,
+                            date_range_days=0,
+                            limit=search_limit,
+                            search_target="title_and_caption",
+                            sort="date_desc",
+                        )
                 if not illusts:
                     yield event.plain_result("未找到相关插画。")
                     return
