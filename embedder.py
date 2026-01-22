@@ -11,7 +11,6 @@ AI Embedding 模块
 
 from __future__ import annotations
 
-
 import asyncio
 import math
 from dataclasses import dataclass

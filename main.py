@@ -38,8 +38,8 @@ except Exception:  # pragma: no cover - allow standalone CLI usage
     filter = None
 
 if TYPE_CHECKING:
-    from pixiv_client import Illust
     from astrbot_plugin_matrix_adapter.matrix_adapter import MatrixPlatformAdapter
+    from pixiv_client import Illust
 
 
 async def retry_async(
@@ -697,7 +697,7 @@ def _get_list(cfg: dict, key: str, default: list):
     return [value]
 
 
-def _build_config_from_astrbot(plugin_cfg: "AstrBotConfig") -> dict:
+def _build_config_from_astrbot(plugin_cfg: AstrBotConfig) -> dict:
     """Build Pixiv-XP-Pusher config from AstrBot plugin config."""
     pixiv_cfg = plugin_cfg.get("pixiv", {}) or {}
     profiler_cfg = plugin_cfg.get("profiler", {}) or {}
@@ -804,7 +804,7 @@ def _build_config_from_astrbot(plugin_cfg: "AstrBotConfig") -> dict:
     return config
 
 
-def _build_push_sessions(plugin_cfg: "AstrBotConfig") -> list[str]:
+def _build_push_sessions(plugin_cfg: AstrBotConfig) -> list[str]:
     return _get_list(plugin_cfg, "push_sessions", [])
 
 
@@ -813,7 +813,7 @@ class AstrBotNotifier:
 
     def __init__(
         self,
-        context: "Context",
+        context: Context,
         sessions: list[str],
         max_pages: int = 10,
         multi_page_mode: str = "cover_link",
@@ -859,7 +859,7 @@ class AstrBotNotifier:
             return None, session
         return None, session
 
-    def _pick_image_urls(self, illust: "Illust") -> list[str]:
+    def _pick_image_urls(self, illust: Illust) -> list[str]:
         if not illust.page_count:
             return []
         limit = max(1, min(self.max_pages, illust.page_count))
@@ -891,7 +891,7 @@ class AstrBotNotifier:
 
     async def _send_text_and_get_reply_id(
         self,
-        adapter: "MatrixPlatformAdapter",
+        adapter: MatrixPlatformAdapter,
         session_id: str,
         text: str,
     ) -> str | None:
@@ -934,7 +934,7 @@ class AstrBotNotifier:
             return None
         return resp.get("event_id")
 
-    def format_message(self, illust: "Illust") -> str:
+    def format_message(self, illust: Illust) -> str:
         tags = ", ".join(illust.tags[:20]) if illust.tags else "N/A"
         r18 = "R18" if illust.is_r18 else "SAFE"
         return (
@@ -948,11 +948,11 @@ class AstrBotNotifier:
     def handle_feedback(self, illust_id: int, action: str) -> bool:
         return False
 
-    async def _send_chain(self, chain: "MessageChain") -> None:
+    async def _send_chain(self, chain: MessageChain) -> None:
         for session in self.sessions:
             await self.context.send_message(session, chain)
 
-    async def send(self, illusts: list["Illust"]) -> list[int]:
+    async def send(self, illusts: list[Illust]) -> list[int]:
         if not illusts or not self.sessions:
             return []
 
@@ -1006,7 +1006,7 @@ class AstrBotNotifier:
 
     async def push_illusts(
         self,
-        illusts: list["Illust"],
+        illusts: list[Illust],
         message_prefix: str = "",
         reply_to_message_id: int | None = None,
     ) -> dict[int, int | None]:

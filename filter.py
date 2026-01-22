@@ -5,8 +5,6 @@
 
 from __future__ import annotations
 
-
-
 import database as db
 from pixiv_client import Illust
 

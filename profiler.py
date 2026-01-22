@@ -5,7 +5,6 @@ XP 画像构建模块
 
 from __future__ import annotations
 
-
 import asyncio
 import itertools
 import json
