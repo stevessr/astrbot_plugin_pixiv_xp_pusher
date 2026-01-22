@@ -1,0 +1,52 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Environment
+.env
+.venv/
+venv/
+ENV/
+
+# IDEs
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Project Specific
+config.yaml
+.initialized
+data/
+logs/
+pixiv_tokens.json
+geckodriver.log
+*.log
+
+# Mac
+.DS_Store
+
+test_*.py
+x-algorithm-main/

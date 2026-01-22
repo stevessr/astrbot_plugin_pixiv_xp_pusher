@@ -1,0 +1,360 @@
+{
+  "auto_start": {
+    "description": "启动时自动运行推送调度",
+    "type": "bool",
+    "default": true
+  },
+  "run_immediately": {
+    "description": "调度启动后立刻执行一次",
+    "type": "bool",
+    "default": false
+  },
+  "test_mode": {
+    "description": "轻量测试模式",
+    "type": "bool",
+    "default": false
+  },
+  "enable_file_logging": {
+    "description": "启用文件日志",
+    "type": "bool",
+    "default": true
+  },
+  "log_dir": {
+    "description": "日志目录（相对插件目录）",
+    "type": "string",
+    "default": "logs"
+  },
+  "use_pixiv_cat": {
+    "description": "使用 pixiv.cat 作为图片代理",
+    "type": "bool",
+    "default": true
+  },
+  "push_sessions": {
+    "description": "主动推送会话（umo 列表）",
+    "type": "list",
+    "hint": "格式示例：default:GroupMessage:123456 或 default:PrivateMessage:123456",
+    "default": []
+  },
+  "platform_name": {
+    "description": "平台名称（用于自动生成会话）",
+    "type": "string",
+    "default": "default",
+    "hint": "在 AstrBot WebUI 的机器人配置中填写的名称"
+  },
+  "target_groups": {
+    "description": "推送群号列表（为空则不推送群）",
+    "type": "list",
+    "default": []
+  },
+  "target_users": {
+    "description": "推送私聊用户列表（为空则不推送私聊）",
+    "type": "list",
+    "default": []
+  },
+  "strategies": {
+    "description": "启用的策略列表",
+    "type": "list",
+    "default": ["xp_search", "related", "ranking", "subscription"]
+  },
+  "max_pages": {
+    "description": "多图作品最大页数",
+    "type": "int",
+    "default": 10
+  },
+  "multi_page_mode": {
+    "description": "多图发送模式",
+    "type": "string",
+    "options": ["cover_link", "multi_image"],
+    "default": "cover_link"
+  },
+  "pixiv": {
+    "description": "Pixiv 配置",
+    "type": "object",
+    "items": {
+      "refresh_token": {
+        "description": "Pixiv refresh token",
+        "type": "string",
+        "default": ""
+      },
+      "sync_token": {
+        "description": "同步专用 token（可选）",
+        "type": "string",
+        "default": ""
+      },
+      "user_id": {
+        "description": "Pixiv 用户 ID",
+        "type": "int",
+        "default": 0
+      }
+    }
+  },
+  "scheduler": {
+    "description": "调度配置",
+    "type": "object",
+    "items": {
+      "cron": {
+        "description": "推送 cron 表达式",
+        "type": "string",
+        "default": "0 12 * * *"
+      },
+      "coalesce": {
+        "description": "错过任务是否合并",
+        "type": "bool",
+        "default": true
+      },
+      "daily_report_cron": {
+        "description": "每日维护任务 cron",
+        "type": "string",
+        "default": "0 0 * * *"
+      }
+    }
+  },
+  "filter": {
+    "description": "过滤与推送策略",
+    "type": "object",
+    "items": {
+      "daily_limit": {
+        "description": "单次推送上限",
+        "type": "int",
+        "default": 20
+      },
+      "exclude_ai": {
+        "description": "过滤 AI 作品",
+        "type": "bool",
+        "default": true
+      },
+      "min_create_days": {
+        "description": "过滤 N 天前作品",
+        "type": "int",
+        "default": 0
+      },
+      "max_per_artist": {
+        "description": "单画师最多推送数",
+        "type": "int",
+        "default": 3
+      },
+      "artist_boost": {
+        "description": "订阅画师加成",
+        "type": "float",
+        "default": 0.3
+      },
+      "r18_mode": {
+        "description": "R18 模式: mixed/safe/r18_only",
+        "type": "string",
+        "default": "mixed"
+      },
+      "shuffle_factor": {
+        "description": "随机打散因子",
+        "type": "float",
+        "default": 0.0
+      },
+      "exploration_ratio": {
+        "description": "探索比例",
+        "type": "float",
+        "default": 0.0
+      },
+      "blacklist_tags": {
+        "description": "黑名单标签",
+        "type": "list",
+        "default": []
+      },
+      "min_match_score": {
+        "description": "最低匹配分数",
+        "type": "float",
+        "default": 0.0
+      },
+      "match_weight": {
+        "description": "匹配分数权重",
+        "type": "float",
+        "default": 0.6
+      }
+    }
+  },
+  "fetcher": {
+    "description": "内容抓取配置",
+    "type": "object",
+    "items": {
+      "bookmark_threshold": {
+        "description": "最低收藏阈值",
+        "type": "object",
+        "items": {
+          "search": {
+            "description": "搜索阈值",
+            "type": "int",
+            "default": 1000
+          },
+          "subscription": {
+            "description": "订阅阈值",
+            "type": "int",
+            "default": 0
+          }
+        }
+      },
+      "subscribed_artists": {
+        "description": "额外关注画师 ID 列表",
+        "type": "list",
+        "default": []
+      },
+      "date_range_days": {
+        "description": "最近 N 天作品",
+        "type": "int",
+        "default": 7
+      },
+      "search_limit": {
+        "description": "搜索数量限制",
+        "type": "int",
+        "default": 50
+      },
+      "ranking": {
+        "description": "排行榜配置",
+        "type": "object",
+        "items": {
+          "enabled": {
+            "description": "启用排行榜",
+            "type": "bool",
+            "default": true
+          },
+          "modes": {
+            "description": "排行榜模式",
+            "type": "list",
+            "default": ["day", "week", "month"]
+          },
+          "limit": {
+            "description": "排行榜拉取数量",
+            "type": "int",
+            "default": 100
+          }
+        }
+      },
+      "mab_limits": {
+        "description": "策略占比限制",
+        "type": "object",
+        "items": {
+          "min_quota": {
+            "description": "最小占比",
+            "type": "float",
+            "default": 0.2
+          },
+          "max_quota": {
+            "description": "最大占比",
+            "type": "float",
+            "default": 0.6
+          }
+        }
+      }
+    }
+  },
+  "profiler": {
+    "description": "画像配置",
+    "type": "object",
+    "items": {
+      "scan_limit": {
+        "description": "扫描收藏数量",
+        "type": "int",
+        "default": 1000
+      },
+      "discovery_rate": {
+        "description": "探索概率",
+        "type": "float",
+        "default": 0.1
+      },
+      "time_decay_days": {
+        "description": "时间衰减半衰期",
+        "type": "int",
+        "default": 180
+      },
+      "saturation_threshold": {
+        "description": "高频标签饱和阈值",
+        "type": "float",
+        "default": 0.5
+      },
+      "top_n": {
+        "description": "保留 Top 标签数",
+        "type": "int",
+        "default": 20
+      },
+      "include_private": {
+        "description": "包含私密收藏",
+        "type": "bool",
+        "default": true
+      },
+      "stop_words": {
+        "description": "停用词列表",
+        "type": "list",
+        "default": ["original", "manga", "pixiv", "illustration"]
+      },
+      "ai": {
+        "description": "AI 标签清洗",
+        "type": "object",
+        "items": {
+          "enabled": {
+            "description": "启用 AI",
+            "type": "bool",
+            "default": false
+          },
+          "provider": {
+            "description": "AI 提供商",
+            "type": "string",
+            "default": "openai"
+          },
+          "api_key": {
+            "description": "API Key",
+            "type": "string",
+            "default": ""
+          },
+          "base_url": {
+            "description": "API Base URL",
+            "type": "string",
+            "default": ""
+          },
+          "model": {
+            "description": "模型名称",
+            "type": "string",
+            "default": "gpt-4o-mini"
+          },
+          "concurrency": {
+            "description": "并发数",
+            "type": "int",
+            "default": 10
+          },
+          "batch_size": {
+            "description": "批次大小",
+            "type": "int",
+            "default": 200
+          },
+          "filter_meaningless": {
+            "description": "过滤无意义标签",
+            "type": "bool",
+            "default": true
+          },
+          "merge_synonyms": {
+            "description": "合并同义词",
+            "type": "bool",
+            "default": true
+          }
+        }
+      }
+    }
+  },
+  "network": {
+    "description": "网络与限流",
+    "type": "object",
+    "items": {
+      "requests_per_minute": {
+        "description": "每分钟请求数",
+        "type": "int",
+        "default": 60
+      },
+      "random_delay": {
+        "description": "请求随机延迟（秒）",
+        "type": "list",
+        "default": [1.0, 3.0]
+      },
+      "max_concurrency": {
+        "description": "下载并发数",
+        "type": "int",
+        "default": 5
+      }
+    }
+  }
+}

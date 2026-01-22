@@ -1,0 +1,14 @@
+version: '3.8'
+
+services:
+  pixiv-xp:
+    build: .
+    container_name: pixiv-xp-pusher
+    restart: unless-stopped
+    volumes:
+      # 持久化数据和配置
+      - ./data:/app/data
+      - ./logs:/app/logs
+      - ./config.yaml:/app/config.yaml:ro
+    environment:
+      - TZ=Asia/Shanghai

@@ -1,0 +1,7 @@
+name: astrbot_plugin_pixiv_xp_pusher
+display_name: Pixiv XP Pusher
+desc: 基于 Pixiv XP 画像的定时推送插件，使用 AstrBot 内置主动推送渠道。
+help: 在插件配置中填写 Pixiv refresh_token / user_id，并配置 push_sessions 或 target_groups/target_users。
+version: v0.2.0
+author: bwwq + AstrBot wrapper
+repo: https://github.com/bwwq/Pixiv-XP-Pusher
