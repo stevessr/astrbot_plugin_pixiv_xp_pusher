@@ -120,7 +120,7 @@ class ContentFilter:
         shuffle_factor: float = 0.0,  # 随机打散因子 (0-0.5)
         exploration_ratio: float = 0.0,  # 探索比例 (0-0.5)
     ):
-        self.blacklist_tags = set(t.lower() for t in (blacklist_tags or []))
+        self.blacklist_tags = {t.lower() for t in (blacklist_tags or [])}
         self.daily_limit = daily_limit
         self.exclude_ai = exclude_ai
         self.min_match_score = min_match_score

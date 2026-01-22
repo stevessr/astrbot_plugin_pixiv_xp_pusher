@@ -718,7 +718,7 @@ class XPProfiler:
         # 先计算所有 Tag 的 DF 并检测饱和度
         saturated_tags = []
         for tag, occurrences in tag_occurrences.items():
-            unique_illusts = set(item[0] for item in occurrences)
+            unique_illusts = {item[0] for item in occurrences}
             df = len(unique_illusts)
             tag_df[tag] = df
 
@@ -739,7 +739,7 @@ class XPProfiler:
             if tag in self.stop_words:
                 continue  # 跳过饱和 Tag
 
-            unique_illusts = set(item[0] for item in occurrences)
+            unique_illusts = {item[0] for item in occurrences}
             dates = [item[1] for item in occurrences]
             weights = [item[2] for item in occurrences]  # 权重系数
 

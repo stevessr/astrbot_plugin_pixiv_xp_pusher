@@ -60,14 +60,14 @@ async def init_db():
                 pushed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 source TEXT  -- 'search' | 'subscription'
             );
-            
+
             -- XP 画像
             CREATE TABLE IF NOT EXISTS xp_profile (
                 tag TEXT PRIMARY KEY,
                 weight REAL DEFAULT 0,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
-            
+
             -- XP Tag 组合 (新)
             CREATE TABLE IF NOT EXISTS xp_tag_pairs (
                 tag1 TEXT,
@@ -75,27 +75,27 @@ async def init_db():
                 weight REAL,
                 PRIMARY KEY (tag1, tag2)
             );
-            
+
             -- 用户反馈
             CREATE TABLE IF NOT EXISTS feedback (
                 illust_id INTEGER PRIMARY KEY,
                 action TEXT,  -- 'like' | 'dislike' | 'skip'
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
-            
+
             -- 收藏同步记录
             CREATE TABLE IF NOT EXISTS bookmarks (
                 illust_id INTEGER PRIMARY KEY,
                 scanned_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
-            
+
             -- 临时黑名单 (由反馈生成)
             CREATE TABLE IF NOT EXISTS tag_blacklist (
                 tag TEXT PRIMARY KEY,
                 dislike_count INTEGER DEFAULT 0,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
-            
+
             -- 作品缓存 (用于反馈处理) - v2: 增加画师信息
             CREATE TABLE IF NOT EXISTS illust_cache (
                 illust_id INTEGER PRIMARY KEY,
@@ -104,7 +104,7 @@ async def init_db():
                 user_name TEXT,       -- 画师名
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
-            
+
             -- AI 处理错误日志
             CREATE TABLE IF NOT EXISTS ai_error_logs (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -121,7 +121,7 @@ async def init_db():
                 illust_create_date TIMESTAMP, -- 作品创建时间
                 scanned_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
-            
+
             -- 系统状态表 (用于记录同步状态等)
             CREATE TABLE IF NOT EXISTS system_state (
                 key TEXT PRIMARY KEY,
@@ -135,14 +135,14 @@ async def init_db():
                 frequency INTEGER DEFAULT 0,
                 PRIMARY KEY (normalized_tag, original_tag)
             );
-            
+
             -- AI 处理结果缓存 (Tag -> CleanedTag/NULL)
             CREATE TABLE IF NOT EXISTS ai_tag_cache (
                 original_tag TEXT PRIMARY KEY,
                 cleaned_tag TEXT,  -- NULL 表示被过滤 (meaningless)
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
-            
+
             -- MAB 策略统计表
             CREATE TABLE IF NOT EXISTS strategy_stats (
                 strategy TEXT PRIMARY KEY,
@@ -150,13 +150,13 @@ async def init_db():
                 total_count INTEGER DEFAULT 0,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
-            
+
             -- Bot 快速屏蔽标签 (持久化)
             CREATE TABLE IF NOT EXISTS blocked_tags (
                 tag TEXT PRIMARY KEY,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
-            
+
             -- Bot 快速屏蔽画师 (持久化)
             CREATE TABLE IF NOT EXISTS blocked_artists (
                 artist_id INTEGER PRIMARY KEY,
@@ -170,14 +170,14 @@ async def init_db():
                 score FLOAT DEFAULT 0,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
-            
+
             -- 负向画像 (用于记录负反馈，主动排斥相似作品)
             CREATE TABLE IF NOT EXISTS negative_profile (
                 tag TEXT PRIMARY KEY,
                 weight REAL DEFAULT 0,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
-            
+
             -- 批量消息与作品映射 (用于 Telegraph 批量模式)
             CREATE TABLE IF NOT EXISTS batch_message_map (
                 message_id INTEGER,
@@ -187,7 +187,7 @@ async def init_db():
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 PRIMARY KEY (message_id, chat_id, illust_index)
             );
-            
+
             -- 作品 Embedding 缓存 (用于语义匹配)
             CREATE TABLE IF NOT EXISTS illust_embeddings (
                 illust_id INTEGER PRIMARY KEY,
@@ -195,7 +195,7 @@ async def init_db():
                 model TEXT,      -- 使用的模型名
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
-            
+
             -- 用户画像 Embedding (低频更新)
             CREATE TABLE IF NOT EXISTS user_embedding (
                 user_id INTEGER PRIMARY KEY,
@@ -288,7 +288,7 @@ async def update_ai_cache(cache_data: dict[str, str | None]):
     async with aiosqlite.connect(DB_PATH) as db:
         await db.executemany(
             "INSERT OR REPLACE INTO ai_tag_cache (original_tag, cleaned_tag) VALUES (?, ?)",
-            [(k, v) for k, v in cache_data.items()],
+            list(cache_data.items()),
         )
         await db.commit()
 
@@ -304,7 +304,7 @@ async def update_tag_mapping_stats(mappings: dict[str, str]):
                 """
                 INSERT INTO tag_mapping_stats (normalized_tag, original_tag, frequency)
                 VALUES (?, ?, 1)
-                ON CONFLICT(normalized_tag, original_tag) 
+                ON CONFLICT(normalized_tag, original_tag)
                 DO UPDATE SET frequency = frequency + 1
             """,
                 (normalized, original),
@@ -430,7 +430,7 @@ async def get_xp_profile() -> dict[str, float]:
             "SELECT tag, weight FROM xp_profile ORDER BY weight DESC"
         )
         rows = await cursor.fetchall()
-        return {tag: weight for tag, weight in rows}
+        return dict(rows)
 
 
 async def update_xp_profile(profile: dict[str, float]):
@@ -450,7 +450,7 @@ async def adjust_tag_weight(tag: str, delta: float):
         await db.execute(
             """
             INSERT INTO xp_profile (tag, weight, updated_at) VALUES (?, ?, ?)
-            ON CONFLICT(tag) DO UPDATE SET 
+            ON CONFLICT(tag) DO UPDATE SET
                 weight = weight + excluded.weight,
                 updated_at = excluded.updated_at
         """,
@@ -619,8 +619,8 @@ async def cache_illust(
     """缓存作品信息 (v4: 包含来源归因 + 连锁元数据)"""
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute(
-            """INSERT OR REPLACE INTO illust_cache 
-               (illust_id, tags, user_id, user_name, source, chain_depth, chain_parent_id, chain_msg_id, created_at) 
+            """INSERT OR REPLACE INTO illust_cache
+               (illust_id, tags, user_id, user_name, source, chain_depth, chain_parent_id, chain_msg_id, created_at)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 illust_id,
@@ -665,8 +665,8 @@ async def get_cached_illust(illust_id: int) -> dict | None:
     """获取缓存的完整作品信息 (用于反馈处理，v3 含连锁信息)"""
     async with aiosqlite.connect(DB_PATH) as db:
         cursor = await db.execute(
-            """SELECT illust_id, tags, user_id, user_name, 
-                      chain_depth, chain_parent_id, chain_msg_id 
+            """SELECT illust_id, tags, user_id, user_name,
+                      chain_depth, chain_parent_id, chain_msg_id
                FROM illust_cache WHERE illust_id = ?""",
             (illust_id,),
         )
@@ -693,7 +693,7 @@ async def set_chain_meta(
     """设置作品的连锁元数据 (用于已缓存的作品)"""
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute(
-            """UPDATE illust_cache 
+            """UPDATE illust_cache
                SET chain_depth = ?, chain_parent_id = ?, chain_msg_id = ?
                WHERE illust_id = ?""",
             (chain_depth, chain_parent_id, chain_msg_id, illust_id),
@@ -797,8 +797,8 @@ async def save_xp_bookmarks(user_id: int, bookmarks: list):
 
     async with aiosqlite.connect(DB_PATH) as db:
         await db.executemany(
-            """INSERT OR REPLACE INTO xp_bookmarks 
-               (illust_id, user_id, tags, illust_create_date) 
+            """INSERT OR REPLACE INTO xp_bookmarks
+               (illust_id, user_id, tags, illust_create_date)
                VALUES (?, ?, ?, ?)""",
             data,
         )
@@ -873,7 +873,7 @@ async def get_push_stats(days: int = 7) -> dict:
         # Top 画师（从缓存表查）
         cursor = await db.execute(
             """
-            SELECT ic.user_id, COUNT(*) as cnt 
+            SELECT ic.user_id, COUNT(*) as cnt
             FROM push_history ph
             JOIN illust_cache ic ON ph.illust_id = ic.illust_id
             WHERE ph.pushed_at > ?
@@ -1355,7 +1355,7 @@ async def sync_blocked_tags_to_xp() -> int:
     """将屏蔽的标签从 XP 画像中移除，返回移除数量"""
     async with aiosqlite.connect(DB_PATH) as db:
         cursor = await db.execute("""
-            DELETE FROM xp_profile 
+            DELETE FROM xp_profile
             WHERE tag IN (SELECT tag FROM blocked_tags)
         """)
         await db.commit()
@@ -1369,7 +1369,7 @@ async def get_uncached_tags(limit: int = 100) -> list[str]:
     async with aiosqlite.connect(DB_PATH) as db:
         cursor = await db.execute(
             """
-            SELECT DISTINCT tag FROM xp_profile 
+            SELECT DISTINCT tag FROM xp_profile
             WHERE tag NOT IN (SELECT original_tag FROM ai_tag_cache)
             LIMIT ?
         """,
@@ -1384,7 +1384,7 @@ async def cleanup_old_sent_history(days: int = 30) -> int:
     async with aiosqlite.connect(DB_PATH) as db:
         cursor = await db.execute(
             """
-            DELETE FROM push_history 
+            DELETE FROM push_history
             WHERE pushed_at < datetime('now', ?)
         """,
             (f"-{days} days",),
@@ -1401,7 +1401,7 @@ async def get_negative_profile() -> dict[str, float]:
             "SELECT tag, weight FROM negative_profile ORDER BY weight DESC"
         )
         rows = await cursor.fetchall()
-        return {tag: weight for tag, weight in rows}
+        return dict(rows)
 
 
 async def adjust_negative_weight(tag: str, delta: float):
@@ -1410,7 +1410,7 @@ async def adjust_negative_weight(tag: str, delta: float):
         await db.execute(
             """
             INSERT INTO negative_profile (tag, weight, updated_at) VALUES (?, ?, ?)
-            ON CONFLICT(tag) DO UPDATE SET 
+            ON CONFLICT(tag) DO UPDATE SET
                 weight = weight + excluded.weight,
                 updated_at = excluded.updated_at
         """,
@@ -1442,7 +1442,7 @@ async def get_popular_tags(limit: int = 20) -> list[tuple[str, float]]:
             """
             SELECT tag, COUNT(*) as freq
             FROM (
-                SELECT json_each.value as tag 
+                SELECT json_each.value as tag
                 FROM xp_bookmarks, json_each(xp_bookmarks.tags)
             )
             GROUP BY tag
@@ -1492,7 +1492,7 @@ async def save_batch_mapping(message_id: int, chat_id: str, illusts: list):
             for i, illust in enumerate(illusts)
         ]
         await db.executemany(
-            """INSERT OR REPLACE INTO batch_message_map 
+            """INSERT OR REPLACE INTO batch_message_map
                (message_id, chat_id, illust_index, illust_id) VALUES (?, ?, ?, ?)""",
             data,
         )
@@ -1513,7 +1513,7 @@ async def get_batch_illust_id(message_id: int, chat_id: str, index: int) -> int 
     """
     async with aiosqlite.connect(DB_PATH) as db:
         cursor = await db.execute(
-            """SELECT illust_id FROM batch_message_map 
+            """SELECT illust_id FROM batch_message_map
                WHERE message_id = ? AND chat_id = ? AND illust_index = ?""",
             (message_id, str(chat_id), index),
         )
@@ -1525,8 +1525,8 @@ async def get_batch_all_illust_ids(message_id: int, chat_id: str) -> list[int]:
     """获取批量消息中所有作品 ID"""
     async with aiosqlite.connect(DB_PATH) as db:
         cursor = await db.execute(
-            """SELECT illust_id FROM batch_message_map 
-               WHERE message_id = ? AND chat_id = ? 
+            """SELECT illust_id FROM batch_message_map
+               WHERE message_id = ? AND chat_id = ?
                ORDER BY illust_index""",
             (message_id, str(chat_id)),
         )
@@ -1538,7 +1538,7 @@ async def cleanup_old_batch_mappings(days: int = 7) -> int:
     """清理旧的批量消息映射"""
     async with aiosqlite.connect(DB_PATH) as db:
         cursor = await db.execute(
-            """DELETE FROM batch_message_map 
+            """DELETE FROM batch_message_map
                WHERE created_at < datetime('now', ?)""",
             (f"-{days} days",),
         )

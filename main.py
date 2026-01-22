@@ -51,14 +51,12 @@ async def retry_async(
     Returns:
         函数返回值，或在所有重试失败后返回 None
     """
-    last_error = None
     current_delay = delay
 
     for attempt in range(max_retries + 1):
         try:
             return await coro_func(*args, **kwargs)
         except Exception as e:
-            last_error = e
             if attempt < max_retries:
                 logger.warning(
                     f"操作失败 (尝试 {attempt + 1}/{max_retries + 1}): {e}，{current_delay:.1f}s 后重试..."
