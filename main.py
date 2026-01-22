@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import re
 import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -40,6 +41,9 @@ except Exception:  # pragma: no cover - allow standalone CLI usage
 if TYPE_CHECKING:
     from astrbot_plugin_matrix_adapter.matrix_adapter import MatrixPlatformAdapter
     from pixiv_client import Illust
+
+
+PIXIV_ILLUST_ID_RE = re.compile(r"(?:artworks/|#)(\d{5,})")
 
 
 async def retry_async(
@@ -1073,6 +1077,84 @@ if Star is not None:
             )
             self._test_mode = bool(self.plugin_config.get("test_mode", False))
 
+        def _extract_pixiv_illust_id(self, text: str) -> int | None:
+            if not text:
+                return None
+            match = PIXIV_ILLUST_ID_RE.search(text)
+            if not match:
+                return None
+            try:
+                return int(match.group(1))
+            except Exception:
+                return None
+
+        def _strip_html(self, text: str) -> str:
+            return re.sub(r"<[^>]+>", " ", text or "")
+
+        async def _resolve_pixiv_illust_id_from_matrix_event(
+            self,
+            client,
+            room_id: str,
+            event_data: dict,
+            depth: int = 0,
+        ) -> int | None:
+            if not isinstance(event_data, dict) or depth > 2:
+                return None
+
+            content = event_data.get("content", {}) or {}
+            text = content.get("body", "") or ""
+            illust_id = self._extract_pixiv_illust_id(text)
+            if illust_id:
+                return illust_id
+
+            formatted = content.get("formatted_body", "")
+            if formatted:
+                illust_id = self._extract_pixiv_illust_id(self._strip_html(formatted))
+                if illust_id:
+                    return illust_id
+
+            relates_to = content.get("m.relates_to", {}) or {}
+            in_reply_to = relates_to.get("m.in_reply_to", {}).get("event_id")
+            if not in_reply_to or in_reply_to == event_data.get("event_id"):
+                return None
+
+            try:
+                parent_event = await client.get_event(room_id, in_reply_to)
+            except Exception as e:
+                logger.debug(f"拉取 Matrix 回复源事件失败：{e}")
+                return None
+
+            return await self._resolve_pixiv_illust_id_from_matrix_event(
+                client, room_id, parent_event, depth + 1
+            )
+
+        async def _add_pixiv_bookmark_from_reaction(self, illust_id: int) -> bool:
+            config = self._load_runtime_config()
+            if not config:
+                return False
+
+            pixiv_cfg = config.get("pixiv", {})
+            token = pixiv_cfg.get("sync_token") or pixiv_cfg.get("refresh_token")
+            if not token:
+                logger.warning("未配置 Pixiv Token，无法通过表情添加收藏。")
+                return False
+
+            network_cfg = config.get("network", {})
+            client = PixivClient(
+                refresh_token=token,
+                requests_per_minute=network_cfg.get("requests_per_minute", 60),
+                random_delay=tuple(network_cfg.get("random_delay", [1.0, 3.0])),
+                max_concurrency=network_cfg.get("max_concurrency", 5),
+                proxy_url=network_cfg.get("proxy_url"),
+            )
+            try:
+                logged_in = await client.login()
+                if not logged_in:
+                    return False
+                return await client.add_bookmark(illust_id)
+            finally:
+                await client.close()
+
         async def initialize(self):
             if self._auto_start:
                 started, message = await self._start_scheduler()
@@ -1378,3 +1460,49 @@ if Star is not None:
             yield event.plain_result(
                 "🧠 已触发用户画像更新\n提示：任务在后台执行，可查看日志确认进度。"
             )
+
+        @filter.event_message_type(filter.EventMessageType.ALL)
+        async def on_matrix_reaction(self, event: AstrMessageEvent):
+            if event.get_platform_name() != "matrix":
+                return
+
+            raw = getattr(event.message_obj, "raw_message", None)
+            if not raw or getattr(raw, "msgtype", "") != "m.reaction":
+                return
+
+            if str(event.get_sender_id()) == str(event.get_self_id()):
+                return
+
+            relates_to = getattr(raw, "content", {}).get("m.relates_to", {}) or {}
+            target_event_id = relates_to.get("event_id")
+            if not target_event_id:
+                return
+
+            client = getattr(event, "client", None)
+            if not client:
+                return
+
+            room_id = event.get_session_id()
+            try:
+                target_event = await client.get_event(room_id, target_event_id)
+            except Exception as e:
+                logger.debug(f"拉取 Matrix 目标事件失败：{e}")
+                return
+
+            if not isinstance(target_event, dict):
+                return
+
+            if str(target_event.get("sender")) != str(event.get_self_id()):
+                return
+
+            illust_id = await self._resolve_pixiv_illust_id_from_matrix_event(
+                client, room_id, target_event
+            )
+            if not illust_id:
+                return
+
+            ok = await self._add_pixiv_bookmark_from_reaction(illust_id)
+            if ok:
+                logger.info(f"已通过 Matrix 反应添加收藏：{illust_id}")
+            else:
+                logger.warning(f"Matrix 反应添加收藏失败：{illust_id}")
