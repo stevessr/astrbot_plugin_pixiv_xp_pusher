@@ -44,28 +44,43 @@
             "default": false
           },
           "provider": {
-            "description": "Embedding Provider（openai/local）",
+            "description": "Embedding Provider (openai/local)",
             "type": "string",
+            "options": ["openai", "local"],
             "default": "openai"
           },
           "model": {
             "description": "Embedding 模型名（OpenAI 或本地模型名）",
             "type": "string",
+            "condition": {
+              "ai.embedding.enabled": true
+            },
             "default": "text-embedding-3-small"
           },
           "api_key": {
             "description": "Embedding API Key",
             "type": "string",
+            "condition": {
+              "ai.embedding.enabled": true,
+              "ai.embedding.provider": "openai"
+            },
             "default": ""
           },
           "base_url": {
             "description": "Embedding API Base URL",
             "type": "string",
+            "condition": {
+              "ai.embedding.enabled": true,
+              "ai.embedding.provider": "openai"
+            },
             "default": ""
           },
           "dimensions": {
             "description": "向量维度",
             "type": "int",
+            "condition": {
+              "ai.embedding.enabled": true
+            },
             "default": 256
           },
           "cache_ttl_days": {
@@ -92,21 +107,33 @@
           "provider": {
             "description": "LLM Provider（openai 等兼容 API）",
             "type": "string",
+            "condition": {
+              "ai.scorer.enabled": true
+            },
             "default": "openai"
           },
           "model": {
             "description": "LLM 模型名",
             "type": "string",
+            "condition": {
+              "ai.scorer.enabled": true
+            },
             "default": "gpt-4o-mini"
           },
           "api_key": {
             "description": "LLM API Key",
             "type": "string",
+            "condition": {
+              "ai.scorer.enabled": true
+            },
             "default": ""
           },
           "base_url": {
             "description": "LLM API Base URL",
             "type": "string",
+            "condition": {
+              "ai.scorer.enabled": true
+            },
             "default": ""
           },
           "max_candidates": {
@@ -206,7 +233,7 @@
         "default": 0.3
       },
       "r18_mode": {
-        "description": "R18 模式: mixed/safe/r18_only",
+        "description": "R18 模式：mixed/safe/r18_only",
         "type": "string",
         "default": "mixed"
       },
