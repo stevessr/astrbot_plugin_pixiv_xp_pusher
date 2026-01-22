@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import random
 import re
 import sys
 from pathlib import Path
@@ -23,7 +24,7 @@ from utils import download_image_with_referer, get_pixiv_cat_url
 
 from astrbot.api import AstrBotConfig, logger
 from astrbot.api.event import AstrMessageEvent, MessageChain, filter
-from astrbot.api.message_components import Reply
+from astrbot.api.message_components import Image, Plain, Reply
 from astrbot.api.star import Context, Star
 from astrbot.core.platform.astr_message_event import MessageSesion
 from astrbot.core.star.filter.command import GreedyStr
@@ -35,6 +36,132 @@ if TYPE_CHECKING:
 
 
 PIXIV_ILLUST_ID_RE = re.compile(r"(?:artworks/|#)(\d{5,})")
+
+
+def _parse_search_tags(raw_tags: str) -> dict:
+    cleaned = (raw_tags or "").strip()
+    all_tags = [t.strip() for t in cleaned.replace("，", ",").split(",") if t.strip()]
+    include_tags = []
+    exclude_tags = []
+    for tag in all_tags:
+        if tag.startswith("-") and len(tag) > 1:
+            exclude_tags.append(tag[1:].lower())
+        else:
+            include_tags.append(tag)
+    include_tags_lower = [t.lower() for t in include_tags]
+    conflict_tags = [t for t in exclude_tags if t in include_tags_lower]
+    if conflict_tags:
+        conflict_list = "、".join(conflict_tags)
+        return {
+            "success": False,
+            "error_message": f"标签冲突：以下标签同时出现在包含和排除列表中：{conflict_list}",
+            "include_tags": [],
+            "exclude_tags": [],
+            "display_tags": cleaned,
+        }
+    if not include_tags:
+        return {
+            "success": False,
+            "error_message": "请至少提供一个包含标签（不以 - 开头的标签）。",
+            "include_tags": [],
+            "exclude_tags": [],
+            "display_tags": cleaned,
+        }
+    return {
+        "success": True,
+        "error_message": "",
+        "include_tags": include_tags,
+        "exclude_tags": exclude_tags,
+        "display_tags": cleaned,
+    }
+
+
+def _has_excluded_tags(illust: Illust, excluded_tags: list[str]) -> bool:
+    if not excluded_tags:
+        return False
+    for tag in illust.tags or []:
+        lname = str(tag).lower()
+        if any(excluded_tag in lname for excluded_tag in excluded_tags):
+            return True
+    return False
+
+
+def _filter_search_illusts(
+    illusts: list[Illust],
+    excluded_tags: list[str],
+    r18_mode: str,
+    exclude_ai: bool,
+) -> tuple[list[Illust], list[str]]:
+    filtered = []
+    filtered_out = {"r18": 0, "ai": 0, "exclude": 0}
+    for illust in illusts:
+        if exclude_ai and getattr(illust, "ai_type", 0) == 2:
+            filtered_out["ai"] += 1
+            continue
+        mode_str = str(r18_mode).lower()
+        if mode_str in ("true", "r18_only", "pure"):
+            if not getattr(illust, "is_r18", False):
+                filtered_out["r18"] += 1
+                continue
+        elif mode_str in ("safe", "18-", "clean"):
+            if getattr(illust, "is_r18", False):
+                filtered_out["r18"] += 1
+                continue
+        if _has_excluded_tags(illust, excluded_tags):
+            filtered_out["exclude"] += 1
+            continue
+        filtered.append(illust)
+
+    messages = []
+    total = len(illusts)
+    if total > 0 and len(filtered) < total:
+        reasons = []
+        if filtered_out["r18"] > 0:
+            reasons.append("R18")
+        if filtered_out["ai"] > 0:
+            reasons.append("AI")
+        if filtered_out["exclude"] > 0:
+            reasons.append("排除标签")
+        if reasons:
+            messages.append(
+                f"部分作品因 {'/'.join(reasons)} 设置被过滤 (找到 {total} 个作品，最终剩 {len(filtered)} 个可发送)。"
+            )
+    if total > 0 and len(filtered) == 0:
+        messages.append("筛选后没有符合条件的作品可发送。")
+    return filtered, messages
+
+
+def _pick_search_image_url(
+    illust: Illust, use_pixiv_cat: bool, max_pages: int
+) -> str | None:
+    if not illust.page_count:
+        return None
+    limit = max(1, min(max_pages, illust.page_count))
+    if use_pixiv_cat:
+        return get_pixiv_cat_url(illust.id, 0) if limit > 0 else None
+    if illust.image_urls:
+        return illust.image_urls[0]
+    return None
+
+
+def _format_search_message(illust: Illust) -> str:
+    tags = ", ".join(illust.tags[:20]) if illust.tags else "N/A"
+    r18 = "R18" if illust.is_r18 else "SAFE"
+    return (
+        f"🎨 {illust.title} (#{illust.id})\n"
+        f"👤 {illust.user_name} ({illust.user_id})\n"
+        f"🔖 {tags}\n"
+        f"⭐ {illust.bookmark_count} | 👀 {illust.view_count} | {r18}\n"
+        f"🔗 https://www.pixiv.net/artworks/{illust.id}"
+    )
+
+
+def _sample_illusts(illusts: list[Illust], count: int) -> list[Illust]:
+    if not illusts:
+        return []
+    count_to_send = max(1, min(len(illusts), count))
+    random.shuffle(illusts)
+    return illusts[:count_to_send]
 
 
 async def retry_async(
@@ -1500,12 +1627,17 @@ if Star is not None:
 
             network_cfg = config.get("network", {})
             fetcher_cfg = config.get("fetcher", {})
+            filter_cfg = config.get("filter", {})
             search_limit = int(fetcher_cfg.get("search_limit", 50))
-            limit = max(1, min(10, search_limit))
+            return_count = max(1, min(10, search_limit))
             bookmark_threshold = fetcher_cfg.get("bookmark_threshold", {}).get(
                 "search", 0
             )
             date_range_days = int(fetcher_cfg.get("date_range_days", 7))
+            r18_mode = filter_cfg.get("r18_mode", "mixed")
+            exclude_ai = bool(filter_cfg.get("exclude_ai", True))
+            use_pixiv_cat = bool(self.plugin_config.get("use_pixiv_cat", True))
+            max_pages = int(config.get("notifier", {}).get("max_pages", 10))
 
             client = PixivClient(
                 refresh_token=token,
@@ -1520,49 +1652,70 @@ if Star is not None:
                     yield event.plain_result("Pixiv 登录失败或未登录，无法搜索。")
                     return
 
-                search_kwargs = {}
-                try:
-                    import inspect
-
-                    params = inspect.signature(client.search_illusts).parameters
-                    if "search_target" in params:
-                        search_kwargs["search_target"] = "partial_match_for_tags"
-                    if "sort" in params:
-                        search_kwargs["sort"] = "date_desc"
-                except Exception:
-                    pass
-
-                illusts = await client.search_illusts(
-                    tags=[raw_query],
-                    bookmark_threshold=bookmark_threshold,
-                    date_range_days=date_range_days,
-                    limit=limit,
-                    **search_kwargs,
-                )
-                if not illusts and date_range_days > 0:
-                    fallback_kwargs = {}
-                    if "search_target" in search_kwargs:
-                        fallback_kwargs["search_target"] = "title_and_caption"
-                    if "sort" in search_kwargs:
-                        fallback_kwargs["sort"] = "date_desc"
-                    illusts = await client.search_illusts(
-                        tags=[raw_query],
-                        bookmark_threshold=bookmark_threshold,
-                        date_range_days=0,
-                        limit=limit,
-                        **fallback_kwargs,
-                    )
-                if not illusts:
-                    yield event.plain_result("未找到符合条件的作品。")
+                tag_result = _parse_search_tags(raw_query)
+                if not tag_result["success"]:
+                    yield event.plain_result(tag_result["error_message"])
                     return
 
-                lines = [f"🔎 搜索结果（共 {len(illusts)} 条）"]
-                for i, ill in enumerate(illusts, 1):
-                    lines.append(
-                        f"{i}. {ill.title} (#{ill.id}) | {ill.user_name} | ⭐{ill.bookmark_count}"
+                include_tags = tag_result["include_tags"]
+                exclude_tags = tag_result["exclude_tags"]
+
+                illusts = await client.search_illusts(
+                    tags=include_tags,
+                    bookmark_threshold=bookmark_threshold,
+                    date_range_days=date_range_days,
+                    limit=search_limit,
+                    search_target="partial_match_for_tags",
+                )
+                if not illusts and date_range_days > 0:
+                    illusts = await client.search_illusts(
+                        tags=include_tags,
+                        bookmark_threshold=bookmark_threshold,
+                        date_range_days=0,
+                        limit=search_limit,
+                        search_target="title_and_caption",
                     )
-                    lines.append(f"   https://www.pixiv.net/artworks/{ill.id}")
-                yield event.plain_result("\n".join(lines))
+                if not illusts:
+                    yield event.plain_result("未找到相关插画。")
+                    return
+
+                filtered, filter_messages = _filter_search_illusts(
+                    illusts, exclude_tags, r18_mode, exclude_ai
+                )
+                for msg in filter_messages:
+                    yield event.plain_result(msg)
+                if not filtered:
+                    return
+
+                to_send = _sample_illusts(filtered, return_count)
+                proxy_url = network_cfg.get("proxy_url")
+                async with aiohttp.ClientSession() as session:
+                    for illust in to_send:
+                        url = _pick_search_image_url(
+                            illust, use_pixiv_cat=use_pixiv_cat, max_pages=max_pages
+                        )
+                        if not url:
+                            yield event.plain_result(
+                                f"跳过无可发送图片的作品：#{illust.id}"
+                            )
+                            continue
+                        try:
+                            img_data = await download_image_with_referer(
+                                session, url, proxy=proxy_url
+                            )
+                            if img_data:
+                                yield event.chain_result(
+                                    [Image.fromBytes(img_data), Plain(_format_search_message(illust))]
+                                )
+                            else:
+                                yield event.plain_result(
+                                    f"图片下载失败，仅发送信息：\n{_format_search_message(illust)}"
+                                )
+                        except Exception as e:
+                            logger.warning(f"搜索图片发送失败：{e}")
+                            yield event.plain_result(
+                                f"图片下载失败，仅发送信息：\n{_format_search_message(illust)}"
+                            )
             except Exception as e:
                 logger.error(f"搜索失败：{e}")
                 yield event.plain_result(f"❌ 搜索失败：{e}")
