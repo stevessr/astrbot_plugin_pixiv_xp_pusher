@@ -21,22 +21,13 @@ from pixiv_client import PixivClient
 from profiler import XPProfiler
 from utils import download_image_with_referer, get_pixiv_cat_url
 
-from astrbot.api import logger
+from astrbot.api import AstrBotConfig, logger
+from astrbot.api.event import AstrMessageEvent, MessageChain, filter
 from astrbot.api.message_components import Reply
+from astrbot.api.star import Context, Star
 from astrbot.core.platform.astr_message_event import MessageSesion
+from astrbot.core.star.filter.command import GreedyStr
 from astrbot.core.utils.io import save_temp_img
-
-try:
-    from astrbot.api import AstrBotConfig
-    from astrbot.api.event import AstrMessageEvent, MessageChain, filter
-    from astrbot.api.star import Context, Star
-except Exception:  # pragma: no cover - allow standalone CLI usage
-    AstrBotConfig = None
-    AstrMessageEvent = None
-    MessageChain = None
-    Context = None
-    Star = None
-    filter = None
 
 if TYPE_CHECKING:
     from astrbot_plugin_matrix_adapter.matrix_adapter import MatrixPlatformAdapter
@@ -251,8 +242,6 @@ async def main_task(
 
         # 3. 过滤
         filter_cfg = config.get("filter", {})
-        match_cfg = fetcher_cfg.get("match_score", {})
-
         # 初始化可选的 Embedder (AI 语义匹配)
         embedder = None
         ai_cfg = config.get("ai", {})
@@ -304,8 +293,8 @@ async def main_task(
             blacklist_tags=filter_cfg.get("blacklist_tags"),
             daily_limit=filter_cfg.get("daily_limit", 20),
             exclude_ai=filter_cfg.get("exclude_ai", True),
-            min_match_score=match_cfg.get("min_threshold", 0.0),
-            match_weight=match_cfg.get("weight_in_sort", 0.5),
+            min_match_score=filter_cfg.get("min_match_score", 0.0),
+            match_weight=filter_cfg.get("match_weight", 0.6),
             max_per_artist=filter_cfg.get("max_per_artist", 3),
             subscribed_artists=all_subs,
             artist_boost=filter_cfg.get("artist_boost", 0.3),
@@ -757,10 +746,6 @@ def _build_config_from_astrbot(plugin_cfg: AstrBotConfig) -> dict:
             "daily_report_cron": scheduler_cfg.get("daily_report_cron", "0 0 * * *"),
         },
         "filter": {
-            "match_score": {
-                "min_threshold": filter_cfg.get("min_match_score", 0.0),
-                "weight_in_sort": filter_cfg.get("match_weight", 0.6),
-            },
             "daily_limit": filter_cfg.get("daily_limit", 20),
             "exclude_ai": filter_cfg.get("exclude_ai", True),
             "max_per_artist": filter_cfg.get("max_per_artist", 3),
@@ -770,6 +755,8 @@ def _build_config_from_astrbot(plugin_cfg: AstrBotConfig) -> dict:
             "shuffle_factor": filter_cfg.get("shuffle_factor", 0.0),
             "exploration_ratio": filter_cfg.get("exploration_ratio", 0.0),
             "blacklist_tags": _get_list(filter_cfg, "blacklist_tags", []),
+            "min_match_score": filter_cfg.get("min_match_score", 0.0),
+            "match_weight": filter_cfg.get("match_weight", 0.6),
             "author_diversity": filter_cfg.get("author_diversity", {}),
             "source_boost": filter_cfg.get("source_boost", {}),
         },
@@ -788,7 +775,6 @@ def _build_config_from_astrbot(plugin_cfg: AstrBotConfig) -> dict:
                 "ranking",
                 {"enabled": True, "modes": ["day", "week", "month"], "limit": 100},
             ),
-            "match_score": fetcher_cfg.get("match_score", {}),
             "mab_limits": fetcher_cfg.get(
                 "mab_limits", {"min_quota": 0.2, "max_quota": 0.6}
             ),
@@ -1460,6 +1446,72 @@ if Star is not None:
             yield event.plain_result(
                 "🧠 已触发用户画像更新\n提示：任务在后台执行，可查看日志确认进度。"
             )
+
+        @pixivxp.command("search")
+        async def search(self, event: AstrMessageEvent, query: GreedyStr):
+            """Pixiv 搜索
+
+            用法：/pixivxp search <query>
+            """
+            if not query or not query.strip():
+                yield event.plain_result("请提供搜索内容")
+                return
+
+            config = self._load_runtime_config()
+            if not config:
+                yield event.plain_result("配置缺失，无法执行搜索。")
+                return
+
+            pixiv_cfg = config.get("pixiv", {})
+            token = pixiv_cfg.get("refresh_token") or pixiv_cfg.get("sync_token")
+            if not token:
+                yield event.plain_result("未配置 Pixiv Token，无法执行搜索。")
+                return
+
+            network_cfg = config.get("network", {})
+            fetcher_cfg = config.get("fetcher", {})
+            search_limit = int(fetcher_cfg.get("search_limit", 50))
+            limit = max(1, min(10, search_limit))
+            bookmark_threshold = fetcher_cfg.get("bookmark_threshold", {}).get(
+                "search", 0
+            )
+            date_range_days = int(fetcher_cfg.get("date_range_days", 7))
+
+            client = PixivClient(
+                refresh_token=token,
+                requests_per_minute=network_cfg.get("requests_per_minute", 60),
+                random_delay=tuple(network_cfg.get("random_delay", [1.0, 3.0])),
+                max_concurrency=network_cfg.get("max_concurrency", 5),
+                proxy_url=network_cfg.get("proxy_url"),
+            )
+            try:
+                logged_in = await client.login()
+                if not logged_in:
+                    yield event.plain_result("Pixiv 登录失败或未登录，无法搜索。")
+                    return
+
+                illusts = await client.search_illusts(
+                    tags=[query.strip()],
+                    bookmark_threshold=bookmark_threshold,
+                    date_range_days=date_range_days,
+                    limit=limit,
+                )
+                if not illusts:
+                    yield event.plain_result("未找到符合条件的作品。")
+                    return
+
+                lines = [f"🔎 搜索结果（共 {len(illusts)} 条）"]
+                for i, ill in enumerate(illusts, 1):
+                    lines.append(
+                        f"{i}. {ill.title} (#{ill.id}) | {ill.user_name} | ⭐{ill.bookmark_count}"
+                    )
+                    lines.append(f"   https://www.pixiv.net/artworks/{ill.id}")
+                yield event.plain_result("\n".join(lines))
+            except Exception as e:
+                logger.error(f"搜索失败：{e}")
+                yield event.plain_result(f"❌ 搜索失败：{e}")
+            finally:
+                await client.close()
 
         @filter.event_message_type(filter.EventMessageType.ALL)
         async def on_matrix_reaction(self, event: AstrMessageEvent):
