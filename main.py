@@ -997,11 +997,8 @@ class AstrBotNotifier:
             )
             for session in self.sessions:
                 adapter, parsed = self._resolve_matrix_adapter(session)
-                if (
-                    adapter
-                    and parsed
-                    and getattr(adapter._matrix_config, "enable_threading", False)
-                ):
+                is_matrix = adapter is not None and parsed is not None
+                if is_matrix and getattr(adapter._matrix_config, "enable_threading", False):
                     ok = await self._send_matrix_threaded(
                         adapter, parsed.session_id, self.format_message(illust), urls
                     )
@@ -1014,7 +1011,7 @@ class AstrBotNotifier:
                     path = await self._download_to_file(url)
                     if path:
                         chain.file_image(path)
-                    else:
+                    elif not is_matrix:
                         chain.url_image(url)
                 await self.context.send_message(session, chain)
             success_ids.append(illust.id)
@@ -1048,11 +1045,8 @@ class AstrBotNotifier:
             )
             for session in self.sessions:
                 adapter, parsed = self._resolve_matrix_adapter(session)
-                if (
-                    adapter
-                    and parsed
-                    and getattr(adapter._matrix_config, "enable_threading", False)
-                ):
+                is_matrix = adapter is not None and parsed is not None
+                if is_matrix and getattr(adapter._matrix_config, "enable_threading", False):
                     ok = await self._send_matrix_threaded(
                         adapter,
                         parsed.session_id,
@@ -1068,7 +1062,7 @@ class AstrBotNotifier:
                     path = await self._download_to_file(image_urls[0])
                     if path:
                         chain.file_image(path)
-                    else:
+                    elif not is_matrix:
                         chain.url_image(image_urls[0])
                 await self.context.send_message(session, chain)
             sent_map[illust.id] = None

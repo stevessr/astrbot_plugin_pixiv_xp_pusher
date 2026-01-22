@@ -187,12 +187,32 @@ async def download_image_with_referer(
     带 Referer 下载 Pixiv 图片
     """
     headers = {
-        "Referer": "https://www.pixiv.net/",
-        "User-Agent": "PixivIOSApp/7.13.3 (iOS 14.6; iPhone13,2)",
+        "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,"
+        "image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
+        "accept-language": "zh-CN,zh;q=0.9,en;q=0.8,en-GB;q=0.7,en-US;q=0.6",
+        "cache-control": "max-age=0",
+        "referer": "https://www.pixiv.net/",
+        "sec-ch-ua": '"Microsoft Edge";v="143", "Chromium";v="143", "Not A(Brand";v="24"',
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": '"Linux"',
+        "sec-fetch-dest": "document",
+        "sec-fetch-mode": "navigate",
+        "sec-fetch-site": "cross-site",
+        "sec-fetch-user": "?1",
+        "upgrade-insecure-requests": "1",
+        "user-agent": "Mozilla/5.0 (X11; Linux x86_64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/143.0.0.0 Safari/537.36 Edg/143.0.0.0",
     }
 
     async def _download():
-        async with session.get(url, headers=headers, proxy=proxy) as resp:
+        timeout = aiohttp.ClientTimeout(total=30)
+        async with session.get(
+            url,
+            headers=headers,
+            proxy=proxy,
+            timeout=timeout,
+        ) as resp:
             resp.raise_for_status()
             return await resp.read()
 
