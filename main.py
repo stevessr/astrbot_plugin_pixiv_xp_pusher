@@ -1189,6 +1189,52 @@ if Star is not None:
             asyncio.create_task(_run())
             return True, "Run-once task started."
 
+        async def _update_profile_background(self) -> tuple[bool, str]:
+            config = self._load_runtime_config()
+            if not config:
+                return False, "Config not found or empty."
+
+            pixiv_cfg = config.get("pixiv", {})
+            if not pixiv_cfg.get("user_id"):
+                return False, "未配置 Pixiv user_id，无法更新用户画像。"
+            if not (pixiv_cfg.get("refresh_token") or pixiv_cfg.get("sync_token")):
+                return False, "未配置 Pixiv Token，无法更新用户画像。"
+
+            async def _notifier_factory(_, __, ___, ____):
+                return []
+
+            async def _run():
+                async with self._run_once_lock:
+                    main_client = None
+                    sync_client = None
+                    try:
+                        main_client, sync_client, profiler, _ = await setup_services(
+                            config, notifiers_factory=_notifier_factory
+                        )
+                        profiler_cfg = config.get("profiler", {})
+                        await profiler.build_profile(
+                            user_id=pixiv_cfg.get("user_id"),
+                            scan_limit=profiler_cfg.get("scan_limit", 500),
+                            include_private=profiler_cfg.get("include_private", True),
+                        )
+                        top_tags = await profiler.get_top_tags(
+                            profiler_cfg.get("top_n", 20)
+                        )
+                        logger.info(
+                            f"✅ 用户画像更新完成，Top Tags: {[t[0] for t in top_tags[:10]]}"
+                        )
+                    except Exception as e:
+                        self._last_error = str(e)
+                        logger.error(f"更新用户画像失败：{e}")
+                    finally:
+                        if main_client:
+                            await main_client.close()
+                        if sync_client and sync_client is not main_client:
+                            await sync_client.close()
+
+            asyncio.create_task(_run())
+            return True, "Profile update task started."
+
         async def _send_test_push(self) -> tuple[bool, str]:
             config = self._load_runtime_config()
             if not config:
@@ -1321,3 +1367,14 @@ if Star is not None:
                 yield event.plain_result(f"❌ 重载失败：{message}")
                 return
             yield event.plain_result("🔄 配置已重载，定时任务已重新启动。")
+
+        @filter.permission_type(filter.PermissionType.ADMIN)
+        @pixivxp.command("profile")
+        async def profile(self, event: AstrMessageEvent):
+            ok, message = await self._update_profile_background()
+            if not ok:
+                yield event.plain_result(f"❌ 更新用户画像失败：{message}")
+                return
+            yield event.plain_result(
+                "🧠 已触发用户画像更新\n提示：任务在后台执行，可查看日志确认进度。"
+            )
