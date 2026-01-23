@@ -1630,7 +1630,16 @@ if Star is not None:
             if not started:
                 yield event.plain_result(f"❌ 重载失败：{message}")
                 return
-            yield event.plain_result("🔄 配置已重载，定时任务已重新启动。")
+            ok, profile_msg = await self._update_profile_background()
+            if ok:
+                yield event.plain_result(
+                    "🔄 配置已重载，定时任务已重新启动。\n🧠 已触发用户标签刷新。"
+                )
+            else:
+                yield event.plain_result(
+                    "🔄 配置已重载，定时任务已重新启动。\n"
+                    f"⚠️ 用户标签刷新失败：{profile_msg}"
+                )
 
         @filter.permission_type(filter.PermissionType.ADMIN)
         @pixivxp.command("profile")
