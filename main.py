@@ -1902,8 +1902,24 @@ if Star is not None:
             if not illust_id:
                 return
 
-            ok = await self._add_pixiv_bookmark_from_reaction(illust_id)
-            if ok:
-                logger.info(f"已通过 Matrix 反应添加收藏：{illust_id}")
-            else:
-                logger.warning(f"Matrix 反应添加收藏失败：{illust_id}")
+            reaction = relates_to.get("key")
+            if not reaction:
+                return
+
+            if reaction == "♥️":
+                ok = await self._add_pixiv_bookmark_from_reaction(illust_id)
+                if ok:
+                    logger.info(f"已通过 Matrix 反应添加收藏：{illust_id}")
+                else:
+                    logger.warning(f"Matrix 反应添加收藏失败：{illust_id}")
+                return
+
+            if reaction == "👎":
+                try:
+                    await init_db()
+                    from database import record_feedback
+
+                    await record_feedback(illust_id, "dislike")
+                    logger.info(f"已通过 Matrix 反应记录不喜欢：{illust_id}")
+                except Exception as e:
+                    logger.warning(f"Matrix 反应记录不喜欢失败：{e}")
