@@ -1623,6 +1623,45 @@ if Star is not None:
                 "🧠 已触发用户画像更新\n提示：任务在后台执行，可查看日志确认进度。"
             )
 
+        @pixivxp.command("feedback")
+        async def feedback(
+            self, event: AstrMessageEvent, action: str = "", illust_id: str = ""
+        ):
+            action = (action or "").strip().lower()
+            if action not in ("like", "dislike"):
+                yield event.plain_result(
+                    "用法：/pixivxp feedback <like|dislike> <illust_id>"
+                )
+                return
+            if not illust_id.isdigit():
+                yield event.plain_result("作品 ID 必须为数字。")
+                return
+
+            try:
+                await init_db()
+                from database import record_feedback
+
+                await record_feedback(int(illust_id), action)
+                yield event.plain_result("✅ 已记录反馈。")
+            except Exception as e:
+                logger.error(f"记录反馈失败：{e}")
+                yield event.plain_result(f"❌ 记录反馈失败：{e}")
+
+        @pixivxp.command("bookmark")
+        async def bookmark(self, event: AstrMessageEvent, illust_id: str = ""):
+            if not illust_id.isdigit():
+                yield event.plain_result("作品 ID 必须为数字。")
+                return
+            try:
+                ok = await self._add_pixiv_bookmark_from_reaction(int(illust_id))
+                if ok:
+                    yield event.plain_result("✅ 已添加收藏。")
+                else:
+                    yield event.plain_result("❌ 添加收藏失败。")
+            except Exception as e:
+                logger.error(f"添加收藏失败：{e}")
+                yield event.plain_result(f"❌ 添加收藏失败：{e}")
+
         @pixivxp.command("search")
         async def search(self, event: AstrMessageEvent, query: GreedyStr):
             """Pixiv 搜索
@@ -1735,8 +1774,16 @@ if Star is not None:
 
                 to_send = _sample_illusts(filtered, return_count)
                 proxy_url = network_cfg.get("proxy_url")
+                await init_db()
                 async with aiohttp.ClientSession() as session:
                     for illust in to_send:
+                        await cache_illust(
+                            illust_id=illust.id,
+                            tags=illust.tags or [],
+                            user_id=illust.user_id,
+                            user_name=illust.user_name,
+                            source="search",
+                        )
                         url = _pick_search_image_url(
                             illust, use_pixiv_cat=use_pixiv_cat, max_pages=max_pages
                         )
@@ -1750,9 +1797,26 @@ if Star is not None:
                                 session, url, proxy=proxy_url
                             )
                             if img_data:
-                                yield event.chain_result(
-                                    [Image.fromBytes(img_data), Plain(_format_search_message(illust))]
-                                )
+                                if event.get_platform_name() == "telegram":
+                                    result = event.chain_result(
+                                        [
+                                            Plain(_format_search_message(illust)),
+                                            Image.fromBytes(img_data),
+                                        ]
+                                    )
+                                    result.buttons = [
+                                        ("👍 Like", f"cmd:/pixivxp feedback like {illust.id}"),
+                                        ("👎 Dislike", f"cmd:/pixivxp feedback dislike {illust.id}"),
+                                        ("⭐ 收藏", f"cmd:/pixivxp bookmark {illust.id}"),
+                                    ]
+                                    yield result
+                                else:
+                                    yield event.chain_result(
+                                        [
+                                            Image.fromBytes(img_data),
+                                            Plain(_format_search_message(illust)),
+                                        ]
+                                    )
                             else:
                                 yield event.plain_result(
                                     f"图片下载失败，仅发送信息：\n{_format_search_message(illust)}"
