@@ -24,7 +24,7 @@ from utils import download_image_with_referer, get_pixiv_cat_url, save_persisten
 
 from astrbot.api import AstrBotConfig, logger
 from astrbot.api.event import AstrMessageEvent, MessageChain, filter
-from astrbot.api.message_components import Image, Plain, Reply
+from astrbot.api.message_components import File, Image, Plain, Reply
 from astrbot.api.star import Context, Star
 from astrbot.core.platform.astr_message_event import MessageSesion
 from astrbot.core.star.filter.command import GreedyStr
@@ -1000,6 +1000,22 @@ class AstrBotNotifier:
             return None, session
         return None, session
 
+    def _is_telegram_session(self, session_str: str) -> bool:
+        try:
+            session = MessageSesion.from_str(session_str)
+            return session.platform_id == "telegram"
+        except Exception:
+            return session_str.startswith("telegram:")
+
+    def _append_image_component(
+        self, chain: MessageChain, session_str: str, path: str
+    ) -> None:
+        if self._is_telegram_session(session_str):
+            name = os.path.basename(path) or "image.jpg"
+            chain.chain.append(File(name=name, file=path))
+        else:
+            chain.file_image(path)
+
     def _pick_image_urls(self, illust: Illust) -> list[str]:
         if not illust.page_count:
             return []
@@ -1146,7 +1162,7 @@ class AstrBotNotifier:
                 if reply_id:
                     image_chain.chain.append(Reply(id=reply_id))
                 for path in downloaded_paths:
-                    image_chain.file_image(path)
+                    self._append_image_component(image_chain, session, path)
                 if image_chain.chain:
                     await self.context.send_message(session, image_chain)
             success_ids.append(illust.id)
@@ -1212,7 +1228,7 @@ class AstrBotNotifier:
                 image_chain = MessageChain()
                 if reply_id:
                     image_chain.chain.append(Reply(id=reply_id))
-                image_chain.file_image(path)
+                self._append_image_component(image_chain, session, path)
                 if image_chain.chain:
                     await self.context.send_message(session, image_chain)
             sent_map[illust.id] = None
