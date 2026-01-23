@@ -199,6 +199,23 @@ def save_persistent_img(data: bytes, url: str | None = None, ext: str = ".jpg") 
     return str(path)
 
 
+def encode_avif_bytes(data: bytes, quality: int = 50) -> bytes | None:
+    try:
+        from PIL import Image
+    except Exception:
+        return None
+
+    try:
+        with Image.open(io.BytesIO(data)) as img:
+            if img.mode not in ("RGB", "RGBA"):
+                img = img.convert("RGB")
+            out = io.BytesIO()
+            img.save(out, format="AVIF", quality=quality)
+            return out.getvalue()
+    except Exception:
+        return None
+
+
 async def download_image_with_referer(
     session: aiohttp.ClientSession,
     url: str,

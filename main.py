@@ -20,7 +20,12 @@ from fetcher import ContentFetcher
 from filter import ContentFilter
 from pixiv_client import PixivClient
 from profiler import XPProfiler
-from utils import download_image_with_referer, get_pixiv_cat_url, save_persistent_img
+from utils import (
+    download_image_with_referer,
+    encode_avif_bytes,
+    get_pixiv_cat_url,
+    save_persistent_img,
+)
 
 from astrbot.api import AstrBotConfig, logger
 from astrbot.api.event import AstrMessageEvent, MessageChain, filter
@@ -1035,6 +1040,9 @@ class AstrBotNotifier:
         try:
             session = await self._get_session()
             data = await download_image_with_referer(session, url, proxy=self.proxy_url)
+            avif_data = encode_avif_bytes(data)
+            if avif_data:
+                return save_persistent_img(avif_data, url=url, ext=".avif")
             return save_persistent_img(data, url=url)
         except Exception as e:
             logger.warning(
@@ -1826,12 +1834,18 @@ if Star is not None:
                                 session, url, proxy=proxy_url
                             )
                             if img_data:
-                                save_persistent_img(img_data, url=url)
+                                avif_data = encode_avif_bytes(img_data)
+                                if avif_data:
+                                    path = save_persistent_img(
+                                        avif_data, url=url, ext=".avif"
+                                    )
+                                else:
+                                    path = save_persistent_img(img_data, url=url)
                                 if event.get_platform_name() == "telegram":
                                     result = event.chain_result(
                                         [
                                             Plain(_format_search_message(illust)),
-                                            Image.fromBytes(img_data),
+                                            Image.fromFileSystem(path),
                                         ]
                                     )
                                     result.buttons = [
@@ -1843,7 +1857,7 @@ if Star is not None:
                                 else:
                                     yield event.chain_result(
                                         [
-                                            Image.fromBytes(img_data),
+                                            Image.fromFileSystem(path),
                                             Plain(_format_search_message(illust)),
                                         ]
                                     )
