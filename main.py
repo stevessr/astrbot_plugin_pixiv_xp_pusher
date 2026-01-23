@@ -20,12 +20,13 @@ from fetcher import ContentFetcher
 from filter import ContentFilter
 from pixiv_client import PixivClient
 from profiler import XPProfiler
-from utils import (
-    download_image_with_referer,
-    encode_avif_bytes,
-    get_pixiv_cat_url,
-    save_persistent_img,
-)
+from utils import download_image_with_referer, get_pixiv_cat_url, save_persistent_img
+
+try:
+    from utils import encode_avif_bytes as _encode_avif_bytes
+except Exception:
+    def _encode_avif_bytes(data: bytes, quality: int = 50) -> bytes | None:
+        return None
 
 from astrbot.api import AstrBotConfig, logger
 from astrbot.api.event import AstrMessageEvent, MessageChain, filter
@@ -1040,7 +1041,7 @@ class AstrBotNotifier:
         try:
             session = await self._get_session()
             data = await download_image_with_referer(session, url, proxy=self.proxy_url)
-            avif_data = encode_avif_bytes(data)
+            avif_data = _encode_avif_bytes(data)
             if avif_data:
                 return save_persistent_img(avif_data, url=url, ext=".avif")
             return save_persistent_img(data, url=url)
@@ -1834,7 +1835,7 @@ if Star is not None:
                                 session, url, proxy=proxy_url
                             )
                             if img_data:
-                                avif_data = encode_avif_bytes(img_data)
+                                avif_data = _encode_avif_bytes(img_data)
                                 if avif_data:
                                     path = save_persistent_img(
                                         avif_data, url=url, ext=".avif"
