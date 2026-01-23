@@ -12,8 +12,11 @@ Prompt 设计参考：
 
 from __future__ import annotations
 
+import base64
 import json
 from dataclasses import dataclass
+
+from utils import download_image_with_referer, get_pixiv_cat_url, save_persistent_img
 
 from astrbot.api import logger
 
@@ -37,6 +40,9 @@ class AIScoreConfig:
     base_url: str = ""
     max_candidates: int = 50  # 超过此数量时跳过 AI 评分
     score_weight: float = 0.3  # AI 分数在最终排序中的权重
+    vision_enabled: bool = False
+    image_max_bytes: int = 2000000
+    proxy_url: str = ""
 
 
 class AIScorer:
@@ -71,6 +77,9 @@ class AIScorer:
         self.model = config.get("model") or ""
         self.max_candidates = config.get("max_candidates", 50)
         self.score_weight = config.get("score_weight", 0.3)
+        self.vision_enabled = bool(config.get("vision_enabled", False))
+        self.image_max_bytes = int(config.get("image_max_bytes", 2000000))
+        self.proxy_url = config.get("proxy_url", "")
 
         self._client = None
         if not self.enabled:
@@ -150,10 +159,38 @@ class AIScorer:
                 candidates="\n".join(candidate_lines),
             )
 
-            # 调用 LLM
+            messages = [{"role": "user", "content": prompt}]
+
+            if self.vision_enabled:
+                image_payloads = await self._build_image_payloads(candidates)
+                if image_payloads:
+                    order = ", ".join(str(iid) for iid, _ in image_payloads)
+                    messages = [
+                        {
+                            "role": "user",
+                            "content": [
+                                {
+                                    "type": "text",
+                                    "text": (
+                                        prompt
+                                        + "\n\n候选图片顺序如下（与候选列表对应）："
+                                        f"{order}"
+                                    ),
+                                },
+                                *[
+                                    {
+                                        "type": "image_url",
+                                        "image_url": {"url": data_url},
+                                    }
+                                    for _, data_url in image_payloads
+                                ],
+                            ],
+                        }
+                    ]
+
             response = await self._client.chat.completions.create(
                 model=self.model,
-                messages=[{"role": "user", "content": prompt}],
+                messages=messages,
                 temperature=0.3,
                 max_tokens=1000,
             )
@@ -185,6 +222,35 @@ class AIScorer:
         except Exception as e:
             logger.error(f"AI 评分失败：{e}")
             return {}
+
+    async def _build_image_payloads(self, candidates: list) -> list[tuple[int, str]]:
+        if not candidates:
+            return []
+        import aiohttp
+
+        results: list[tuple[int, str]] = []
+        async with aiohttp.ClientSession() as session:
+            for illust in candidates:
+                url = None
+                if getattr(illust, "image_urls", None):
+                    url = illust.image_urls[0]
+                if not url:
+                    url = get_pixiv_cat_url(illust.id, 0)
+                try:
+                    data = await download_image_with_referer(
+                        session, url, proxy=self.proxy_url or None
+                    )
+                    if not data:
+                        continue
+                    if len(data) > self.image_max_bytes:
+                        continue
+                    save_persistent_img(data, url=url)
+                    b64 = base64.b64encode(data).decode("utf-8")
+                    data_url = f"data:image/jpeg;base64,{b64}"
+                    results.append((illust.id, data_url))
+                except Exception:
+                    continue
+        return results
 
     def blend_scores(
         self, base_scores: dict[int, float], ai_scores: dict[int, float]

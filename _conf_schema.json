@@ -160,6 +160,23 @@
               "enabled": true
             },
             "default": 0.3
+          },
+          "vision_enabled": {
+            "description": "模型是否具备视觉能力",
+            "type": "bool",
+            "condition": {
+              "enabled": true
+            },
+            "default": false
+          },
+          "image_max_bytes": {
+            "description": "视觉评分图片最大字节数",
+            "type": "int",
+            "condition": {
+              "enabled": true,
+              "vision_enabled": true
+            },
+            "default": 2000000
           }
         }
       }

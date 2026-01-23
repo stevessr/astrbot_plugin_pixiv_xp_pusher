@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import io
 import os
 import random
@@ -174,6 +175,28 @@ def get_pixiv_cat_url(illust_id: int, page: int = 0) -> str:
         return f"https://pixiv.cat/{illust_id}.jpg"
     else:
         return f"https://pixiv.cat/{illust_id}-{page + 1}.jpg"
+
+
+def get_persistent_image_dir() -> Path:
+    data_dir = Path(__file__).parent / "data" / "images"
+    data_dir.mkdir(parents=True, exist_ok=True)
+    return data_dir
+
+
+def save_persistent_img(data: bytes, url: str | None = None, ext: str = ".jpg") -> str:
+    key = url or hashlib.sha256(data).hexdigest()
+    if url:
+        key = hashlib.sha256(url.encode("utf-8")).hexdigest()
+        if "." in url.split("/")[-1]:
+            ext_candidate = "." + url.split("/")[-1].split(".")[-1].split("?")[0]
+            if 1 < len(ext_candidate) <= 5:
+                ext = ext_candidate
+    filename = f"{key}{ext}"
+    path = get_persistent_image_dir() / filename
+    if not path.exists():
+        with open(path, "wb") as f:
+            f.write(data)
+    return str(path)
 
 
 async def download_image_with_referer(

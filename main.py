@@ -20,7 +20,7 @@ from fetcher import ContentFetcher
 from filter import ContentFilter
 from pixiv_client import PixivClient
 from profiler import XPProfiler
-from utils import download_image_with_referer, get_pixiv_cat_url
+from utils import download_image_with_referer, get_pixiv_cat_url, save_persistent_img
 
 from astrbot.api import AstrBotConfig, logger
 from astrbot.api.event import AstrMessageEvent, MessageChain, filter
@@ -28,7 +28,6 @@ from astrbot.api.message_components import Image, Plain, Reply
 from astrbot.api.star import Context, Star
 from astrbot.core.platform.astr_message_event import MessageSesion
 from astrbot.core.star.filter.command import GreedyStr
-from astrbot.core.utils.io import save_temp_img
 
 if TYPE_CHECKING:
     from astrbot_plugin_matrix_adapter.matrix_adapter import MatrixPlatformAdapter
@@ -426,9 +425,14 @@ async def main_task(
                         or profiler_ai_cfg.get("model", ""),
                         "max_candidates": scorer_cfg.get("max_candidates", 50),
                         "score_weight": scorer_cfg.get("score_weight", 0.3),
+                        "vision_enabled": scorer_cfg.get("vision_enabled", False),
+                        "image_max_bytes": scorer_cfg.get("image_max_bytes", 2000000),
+                        "proxy_url": network_cfg.get("proxy_url", ""),
                     }
                     ai_scorer = AIScorer(merged_cfg)
                 else:
+                    scorer_cfg = dict(scorer_cfg)
+                    scorer_cfg.setdefault("proxy_url", network_cfg.get("proxy_url", ""))
                     ai_scorer = AIScorer(scorer_cfg)
 
                 if ai_scorer.enabled:
@@ -1015,7 +1019,7 @@ class AstrBotNotifier:
         try:
             session = await self._get_session()
             data = await download_image_with_referer(session, url, proxy=self.proxy_url)
-            return save_temp_img(data)
+            return save_persistent_img(data, url=url)
         except Exception as e:
             logger.warning(
                 "下载图片失败：url=%s proxy=%s err=%s",
@@ -1797,6 +1801,7 @@ if Star is not None:
                                 session, url, proxy=proxy_url
                             )
                             if img_data:
+                                save_persistent_img(img_data, url=url)
                                 if event.get_platform_name() == "telegram":
                                     result = event.chain_result(
                                         [
