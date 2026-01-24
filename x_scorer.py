@@ -566,10 +566,10 @@ def create_scorer_from_config(
         XScorer 实例
     """
     filter_cfg = config.get("filter", {})
-    x_cfg = config.get("x_algorithm", {})
+    algorithm_cfg = filter_cfg.get("algorithm", {})
 
     # 构建权重配置
-    weights_cfg = x_cfg.get("weights", {})
+    weights_cfg = algorithm_cfg.get("weights", {})
     weights = FeatureWeights(
         tag_match=weights_cfg.get("tag_match", 0.35),
         semantic=weights_cfg.get("semantic", 0.15),
@@ -577,7 +577,7 @@ def create_scorer_from_config(
         like_ratio=weights_cfg.get("like_ratio", 0.10),
         recency=weights_cfg.get("recency", 0.10),
         author_affinity=weights_cfg.get("author_affinity", 0.10),
-        source_boost=x_cfg.get(
+        source_boost=algorithm_cfg.get(
             "source_boost",
             {
                 "xp_search": 1.0,
@@ -587,10 +587,10 @@ def create_scorer_from_config(
                 "engagement_artists": 1.20,
             },
         ),
-        author_diversity_decay=x_cfg.get("author_diversity_decay", 0.7),
-        author_diversity_floor=x_cfg.get("author_diversity_floor", 0.1),
-        exploration_ratio=filter_cfg.get("exploration_ratio", 0.1),
-        shuffle_noise=filter_cfg.get("shuffle_factor", 0.05),
+        author_diversity_decay=algorithm_cfg.get("author_diversity_decay", 0.7),
+        author_diversity_floor=algorithm_cfg.get("author_diversity_floor", 0.1),
+        exploration_ratio=algorithm_cfg.get("exploration_ratio", 0.1),
+        shuffle_noise=algorithm_cfg.get("shuffle_noise", 0.05),
     )
 
     return XScorer(

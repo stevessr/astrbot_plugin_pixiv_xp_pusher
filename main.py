@@ -388,8 +388,8 @@ async def main_task(
 
         # 3. 过滤
         filter_cfg = config.get("filter", {})
-        x_algorithm_cfg = config.get("x_algorithm", {})
-        use_x_algorithm = x_algorithm_cfg.get("enabled", True)
+        algorithm_cfg = filter_cfg.get("algorithm", {})
+        use_x_algorithm = algorithm_cfg.get("type", "x_algorithm") == "x_algorithm"
 
         # 初始化可选的 Embedder (AI 语义匹配)
         embedder = None
@@ -488,19 +488,19 @@ async def main_task(
                 blacklist_tags=filter_cfg.get("blacklist_tags"),
                 daily_limit=filter_cfg.get("daily_limit", 20),
                 exclude_ai=filter_cfg.get("exclude_ai", True),
-                min_match_score=filter_cfg.get("min_match_score", 0.0),
-                match_weight=filter_cfg.get("match_weight", 0.6),
+                min_match_score=algorithm_cfg.get("min_match_score", 0.0),
+                match_weight=algorithm_cfg.get("match_weight", 0.6),
                 max_per_artist=filter_cfg.get("max_per_artist", 3),
                 subscribed_artists=all_subs,
-                artist_boost=filter_cfg.get("artist_boost", 0.3),
+                artist_boost=algorithm_cfg.get("artist_boost", 0.3),
                 min_create_days=filter_cfg.get("min_create_days", 0),
                 r18_mode=filter_cfg.get("r18_mode", False),
-                author_diversity=filter_cfg.get("author_diversity"),
-                source_boost=filter_cfg.get("source_boost"),
+                author_diversity=algorithm_cfg.get("author_diversity"),
+                source_boost=algorithm_cfg.get("source_boost"),
                 embedder=embedder,
                 ai_scorer=ai_scorer,
-                shuffle_factor=filter_cfg.get("shuffle_factor", 0.0),
-                exploration_ratio=filter_cfg.get("exploration_ratio", 0.0),
+                shuffle_factor=algorithm_cfg.get("shuffle_factor", 0.0),
+                exploration_ratio=algorithm_cfg.get("legacy_exploration_ratio", 0.0),
             )
 
             filtered = await content_filter.filter(

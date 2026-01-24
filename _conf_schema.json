@@ -265,40 +265,172 @@
         "type": "int",
         "default": 3
       },
-      "artist_boost": {
-        "description": "订阅画师加成",
-        "type": "float",
-        "default": 0.3
-      },
       "r18_mode": {
         "description": "R18 模式：mixed/safe/r18_only",
         "type": "string",
         "default": "mixed"
-      },
-      "shuffle_factor": {
-        "description": "随机打散因子",
-        "type": "float",
-        "default": 0.0
-      },
-      "exploration_ratio": {
-        "description": "探索比例",
-        "type": "float",
-        "default": 0.0
       },
       "blacklist_tags": {
         "description": "黑名单标签",
         "type": "list",
         "default": []
       },
-      "min_match_score": {
-        "description": "最低匹配分数",
-        "type": "float",
-        "default": 0.0
-      },
-      "match_weight": {
-        "description": "匹配分数权重",
-        "type": "float",
-        "default": 0.6
+      "algorithm": {
+        "description": "排序算法配置",
+        "type": "object",
+        "items": {
+          "type": {
+            "description": "算法类型：x_algorithm (推荐) / legacy (旧版)",
+            "type": "string",
+            "options": ["x_algorithm", "legacy"],
+            "default": "x_algorithm"
+          },
+          "weights": {
+            "description": "X-Algorithm 特征权重",
+            "type": "object",
+            "condition": {
+              "type": "x_algorithm"
+            },
+            "items": {
+              "tag_match": {
+                "description": "XP 标签匹配权重",
+                "type": "float",
+                "default": 0.35
+              },
+              "semantic": {
+                "description": "语义 Embedding 相似度权重",
+                "type": "float",
+                "default": 0.15
+              },
+              "popularity": {
+                "description": "热度权重 (收藏数)",
+                "type": "float",
+                "default": 0.20
+              },
+              "like_ratio": {
+                "description": "点赞率权重",
+                "type": "float",
+                "default": 0.10
+              },
+              "recency": {
+                "description": "时效性权重 (越新越高)",
+                "type": "float",
+                "default": 0.10
+              },
+              "author_affinity": {
+                "description": "画师亲和度权重 (关注加成)",
+                "type": "float",
+                "default": 0.10
+              }
+            }
+          },
+          "source_boost": {
+            "description": "X-Algorithm 来源加成 (乘法因子)",
+            "type": "object",
+            "condition": {
+              "type": "x_algorithm"
+            },
+            "items": {
+              "xp_search": {
+                "description": "XP 搜索加成",
+                "type": "float",
+                "default": 1.0
+              },
+              "subscription": {
+                "description": "订阅画师加成",
+                "type": "float",
+                "default": 1.15
+              },
+              "ranking": {
+                "description": "排行榜加成",
+                "type": "float",
+                "default": 0.95
+              },
+              "related": {
+                "description": "关联推荐加成",
+                "type": "float",
+                "default": 1.10
+              },
+              "engagement_artists": {
+                "description": "互动画师加成",
+                "type": "float",
+                "default": 1.20
+              }
+            }
+          },
+          "author_diversity_decay": {
+            "description": "X-Algorithm 同画师衰减因子 (0-1)",
+            "type": "float",
+            "condition": {
+              "type": "x_algorithm"
+            },
+            "default": 0.7
+          },
+          "author_diversity_floor": {
+            "description": "X-Algorithm 衰减下限",
+            "type": "float",
+            "condition": {
+              "type": "x_algorithm"
+            },
+            "default": 0.1
+          },
+          "exploration_ratio": {
+            "description": "X-Algorithm 探索比例 (0-0.5)",
+            "type": "float",
+            "condition": {
+              "type": "x_algorithm"
+            },
+            "default": 0.1
+          },
+          "shuffle_noise": {
+            "description": "X-Algorithm 随机噪声幅度",
+            "type": "float",
+            "condition": {
+              "type": "x_algorithm"
+            },
+            "default": 0.05
+          },
+          "artist_boost": {
+            "description": "Legacy 订阅画师加成",
+            "type": "float",
+            "condition": {
+              "type": "legacy"
+            },
+            "default": 0.3
+          },
+          "shuffle_factor": {
+            "description": "Legacy 随机打散因子",
+            "type": "float",
+            "condition": {
+              "type": "legacy"
+            },
+            "default": 0.0
+          },
+          "legacy_exploration_ratio": {
+            "description": "Legacy 探索比例",
+            "type": "float",
+            "condition": {
+              "type": "legacy"
+            },
+            "default": 0.0
+          },
+          "min_match_score": {
+            "description": "Legacy 最低匹配分数",
+            "type": "float",
+            "condition": {
+              "type": "legacy"
+            },
+            "default": 0.0
+          },
+          "match_weight": {
+            "description": "Legacy 匹配分数权重",
+            "type": "float",
+            "condition": {
+              "type": "legacy"
+            },
+            "default": 0.6
+          }
+        }
       }
     }
   },
@@ -515,106 +647,6 @@
         "description": "代理地址",
         "type": "string",
         "default": ""
-      }
-    }
-  },
-  "x_algorithm": {
-    "description": "X-Algorithm 风格排序配置",
-    "type": "object",
-    "items": {
-      "enabled": {
-        "description": "启用 X-Algorithm 评分引擎",
-        "type": "bool",
-        "default": true
-      },
-      "weights": {
-        "description": "特征权重配置",
-        "type": "object",
-        "condition": {
-          "enabled": true
-        },
-        "items": {
-          "tag_match": {
-            "description": "XP 标签匹配权重",
-            "type": "float",
-            "default": 0.35
-          },
-          "semantic": {
-            "description": "语义 Embedding 相似度权重",
-            "type": "float",
-            "default": 0.15
-          },
-          "popularity": {
-            "description": "热度权重 (收藏数)",
-            "type": "float",
-            "default": 0.20
-          },
-          "like_ratio": {
-            "description": "点赞率权重",
-            "type": "float",
-            "default": 0.10
-          },
-          "recency": {
-            "description": "时效性权重 (越新越高)",
-            "type": "float",
-            "default": 0.10
-          },
-          "author_affinity": {
-            "description": "画师亲和度权重 (关注加成)",
-            "type": "float",
-            "default": 0.10
-          }
-        }
-      },
-      "source_boost": {
-        "description": "来源加成配置 (乘法因子)",
-        "type": "object",
-        "condition": {
-          "enabled": true
-        },
-        "items": {
-          "xp_search": {
-            "description": "XP 搜索加成",
-            "type": "float",
-            "default": 1.0
-          },
-          "subscription": {
-            "description": "订阅画师加成",
-            "type": "float",
-            "default": 1.15
-          },
-          "ranking": {
-            "description": "排行榜加成",
-            "type": "float",
-            "default": 0.95
-          },
-          "related": {
-            "description": "关联推荐加成",
-            "type": "float",
-            "default": 1.10
-          },
-          "engagement_artists": {
-            "description": "互动画师加成",
-            "type": "float",
-            "default": 1.20
-          }
-        }
-      },
-      "author_diversity_decay": {
-        "description": "同画师衰减因子 (0-1)",
-        "type": "float",
-        "condition": {
-          "enabled": true
-        },
-        "default": 0.7
-      },
-      "author_diversity_floor": {
-        "description": "衰减下限",
-        "type": "float",
-        "condition": {
-          "enabled": true
-        },
-        "default": 0.1
       }
     }
   }
