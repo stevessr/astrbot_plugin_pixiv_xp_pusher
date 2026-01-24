@@ -883,21 +883,16 @@ def _get_list(cfg: dict, key: str, default: list):
 
 
 def _parse_ranking_config(ranking_cfg: dict) -> dict:
-    """解析排行榜配置，支持新旧两种格式"""
+    """解析排行榜配置"""
     if not ranking_cfg:
         return {"enabled": True, "modes": ["day", "week", "month"], "limit": 100}
 
     enabled = ranking_cfg.get("enabled", True)
     limit = ranking_cfg.get("limit", 100)
-    modes_cfg = ranking_cfg.get("modes", ["day", "week", "month"])
+    modes_cfg = ranking_cfg.get("modes", {})
 
-    # 解析 modes (支持新旧格式)
-    if isinstance(modes_cfg, dict):
-        # 新格式：{day: true, week: false, ...}
-        modes = [k for k, v in modes_cfg.items() if v]
-    else:
-        # 旧格式：["day", "week", ...]
-        modes = modes_cfg if modes_cfg else ["day", "week", "month"]
+    # 新格式：{day: true, week: false, ...}
+    modes = [k for k, v in modes_cfg.items() if v] if modes_cfg else ["day", "week", "month"]
 
     return {"enabled": enabled, "modes": modes, "limit": limit}
 
@@ -913,14 +908,9 @@ def _build_config_from_astrbot(plugin_cfg: AstrBotConfig) -> dict:
     fetcher_cfg = plugin_cfg.get("fetcher", {}) or {}
     network_cfg = plugin_cfg.get("network", {}) or {}
 
-    # 解析 strategies 配置 (支持新旧两种格式)
+    # 解析 strategies 配置
     strategies_cfg = plugin_cfg.get("strategies", {})
-    if isinstance(strategies_cfg, dict):
-        # 新格式：{xp_search: true, ranking: false, ...}
-        strategies = [k for k, v in strategies_cfg.items() if v]
-    else:
-        # 旧格式：["xp_search", "ranking", ...]
-        strategies = strategies_cfg if strategies_cfg else ["xp_search", "related", "ranking", "subscription"]
+    strategies = [k for k, v in strategies_cfg.items() if v] if strategies_cfg else ["xp_search", "related", "ranking", "subscription"]
 
     config = {
         "pixiv": {
