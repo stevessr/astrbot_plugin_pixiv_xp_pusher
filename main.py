@@ -411,6 +411,7 @@ async def main_task(
         # 初始化可选的 AIScorer (LLM 精排)
         ai_scorer = None
         scorer_cfg = ai_cfg.get("scorer", {})
+        network_cfg = config.get("network", {})
         if scorer_cfg.get("enabled", False):
             try:
                 from ai_scorer import AIScorer
