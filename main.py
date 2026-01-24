@@ -22,15 +22,9 @@ from pixiv_client import PixivClient
 from profiler import XPProfiler
 from utils import download_image_with_referer, get_pixiv_cat_url, save_persistent_img
 
-try:
-    from utils import encode_avif_bytes as _encode_avif_bytes
-except Exception:
-    def _encode_avif_bytes(data: bytes, quality: int = 50) -> bytes | None:
-        return None
-
 from astrbot.api import AstrBotConfig, logger
 from astrbot.api.event import AstrMessageEvent, MessageChain, filter
-from astrbot.api.message_components import File, Image, Plain, Reply
+from astrbot.api.message_components import Image, Plain, Reply
 from astrbot.api.star import Context, Star
 from astrbot.core.platform.astr_message_event import MessageSesion
 from astrbot.core.star.filter.command import GreedyStr
@@ -1010,7 +1004,7 @@ class AstrBotNotifier:
     def _append_image_component(
         self, chain: MessageChain, session_str: str, path: str
     ) -> None:
-        # Telegram 平台优先以图片形式发送
+        # 图片已在 _download_to_file 中压缩为 AVIF，直接以图片形式发送
         chain.file_image(path)
 
     def _pick_image_urls(self, illust: Illust) -> list[str]:
@@ -1032,9 +1026,6 @@ class AstrBotNotifier:
         try:
             session = await self._get_session()
             data = await download_image_with_referer(session, url, proxy=self.proxy_url)
-            avif_data = _encode_avif_bytes(data)
-            if avif_data:
-                return save_persistent_img(avif_data, url=url, ext=".avif")
             return save_persistent_img(data, url=url)
         except Exception as e:
             logger.warning(
@@ -1826,13 +1817,7 @@ if Star is not None:
                                 session, url, proxy=proxy_url
                             )
                             if img_data:
-                                avif_data = _encode_avif_bytes(img_data)
-                                if avif_data:
-                                    path = save_persistent_img(
-                                        avif_data, url=url, ext=".avif"
-                                    )
-                                else:
-                                    path = save_persistent_img(img_data, url=url)
+                                path = save_persistent_img(img_data, url=url)
                                 if event.get_platform_name() == "telegram":
                                     result = event.chain_result(
                                         [

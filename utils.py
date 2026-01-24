@@ -183,14 +183,21 @@ def get_persistent_image_dir() -> Path:
     return data_dir
 
 
-def save_persistent_img(data: bytes, url: str | None = None, ext: str = ".jpg") -> str:
+def save_persistent_img(
+    data: bytes, url: str | None = None, ext: str = ".jpg", convert_avif: bool = True
+) -> str:
+    """保存图片到持久化目录，默认自动转换为 AVIF 格式"""
     key = url or hashlib.sha256(data).hexdigest()
     if url:
         key = hashlib.sha256(url.encode("utf-8")).hexdigest()
-        if "." in url.split("/")[-1]:
-            ext_candidate = "." + url.split("/")[-1].split(".")[-1].split("?")[0]
-            if 1 < len(ext_candidate) <= 5:
-                ext = ext_candidate
+
+    # 尝试转换为 AVIF
+    if convert_avif:
+        avif_data = encode_avif_bytes(data)
+        if avif_data:
+            data = avif_data
+            ext = ".avif"
+
     filename = f"{key}{ext}"
     path = get_persistent_image_dir() / filename
     if not path.exists():
