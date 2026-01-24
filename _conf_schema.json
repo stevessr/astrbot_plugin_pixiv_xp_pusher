@@ -19,6 +19,12 @@
     "type": "bool",
     "default": true
   },
+  "image_compression": {
+    "description": "图片压缩方式",
+    "type": "string",
+    "options": ["none", "webp", "avif"],
+    "default": "avif"
+  },
   "push_sessions": {
     "description": "主动推送会话（umo 列表）",
     "type": "list",
@@ -509,6 +515,106 @@
         "description": "代理地址",
         "type": "string",
         "default": ""
+      }
+    }
+  },
+  "x_algorithm": {
+    "description": "X-Algorithm 风格排序配置",
+    "type": "object",
+    "items": {
+      "enabled": {
+        "description": "启用 X-Algorithm 评分引擎",
+        "type": "bool",
+        "default": true
+      },
+      "weights": {
+        "description": "特征权重配置",
+        "type": "object",
+        "condition": {
+          "enabled": true
+        },
+        "items": {
+          "tag_match": {
+            "description": "XP 标签匹配权重",
+            "type": "float",
+            "default": 0.35
+          },
+          "semantic": {
+            "description": "语义 Embedding 相似度权重",
+            "type": "float",
+            "default": 0.15
+          },
+          "popularity": {
+            "description": "热度权重 (收藏数)",
+            "type": "float",
+            "default": 0.20
+          },
+          "like_ratio": {
+            "description": "点赞率权重",
+            "type": "float",
+            "default": 0.10
+          },
+          "recency": {
+            "description": "时效性权重 (越新越高)",
+            "type": "float",
+            "default": 0.10
+          },
+          "author_affinity": {
+            "description": "画师亲和度权重 (关注加成)",
+            "type": "float",
+            "default": 0.10
+          }
+        }
+      },
+      "source_boost": {
+        "description": "来源加成配置 (乘法因子)",
+        "type": "object",
+        "condition": {
+          "enabled": true
+        },
+        "items": {
+          "xp_search": {
+            "description": "XP 搜索加成",
+            "type": "float",
+            "default": 1.0
+          },
+          "subscription": {
+            "description": "订阅画师加成",
+            "type": "float",
+            "default": 1.15
+          },
+          "ranking": {
+            "description": "排行榜加成",
+            "type": "float",
+            "default": 0.95
+          },
+          "related": {
+            "description": "关联推荐加成",
+            "type": "float",
+            "default": 1.10
+          },
+          "engagement_artists": {
+            "description": "互动画师加成",
+            "type": "float",
+            "default": 1.20
+          }
+        }
+      },
+      "author_diversity_decay": {
+        "description": "同画师衰减因子 (0-1)",
+        "type": "float",
+        "condition": {
+          "enabled": true
+        },
+        "default": 0.7
+      },
+      "author_diversity_floor": {
+        "description": "衰减下限",
+        "type": "float",
+        "condition": {
+          "enabled": true
+        },
+        "default": 0.1
       }
     }
   }

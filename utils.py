@@ -184,19 +184,35 @@ def get_persistent_image_dir() -> Path:
 
 
 def save_persistent_img(
-    data: bytes, url: str | None = None, ext: str = ".jpg", convert_avif: bool = True
+    data: bytes,
+    url: str | None = None,
+    ext: str = ".jpg",
+    compression: str = "avif",
 ) -> str:
-    """保存图片到持久化目录，默认自动转换为 AVIF 格式"""
+    """保存图片到持久化目录
+
+    Args:
+        data: 原始图片数据
+        url: 图片 URL（用于生成缓存 key）
+        ext: 默认扩展名
+        compression: 压缩方式 (none/webp/avif)
+    """
     key = url or hashlib.sha256(data).hexdigest()
     if url:
         key = hashlib.sha256(url.encode("utf-8")).hexdigest()
 
-    # 尝试转换为 AVIF
-    if convert_avif:
-        avif_data = encode_avif_bytes(data)
-        if avif_data:
-            data = avif_data
+    # 根据压缩方式转换图片
+    if compression == "avif":
+        converted = encode_avif_bytes(data)
+        if converted:
+            data = converted
             ext = ".avif"
+    elif compression == "webp":
+        converted = encode_webp_bytes(data)
+        if converted:
+            data = converted
+            ext = ".webp"
+    # compression == "none" 时不转换
 
     filename = f"{key}{ext}"
     path = get_persistent_image_dir() / filename
@@ -209,6 +225,10 @@ def save_persistent_img(
 def encode_avif_bytes(data: bytes, quality: int = 50) -> bytes | None:
     try:
         from PIL import Image
+        try:
+            import pillow_avif  # noqa: F401
+        except ImportError:
+            pass
     except Exception:
         return None
 
@@ -218,6 +238,23 @@ def encode_avif_bytes(data: bytes, quality: int = 50) -> bytes | None:
                 img = img.convert("RGB")
             out = io.BytesIO()
             img.save(out, format="AVIF", quality=quality)
+            return out.getvalue()
+    except Exception:
+        return None
+
+
+def encode_webp_bytes(data: bytes, quality: int = 80) -> bytes | None:
+    try:
+        from PIL import Image
+    except Exception:
+        return None
+
+    try:
+        with Image.open(io.BytesIO(data)) as img:
+            if img.mode not in ("RGB", "RGBA"):
+                img = img.convert("RGB")
+            out = io.BytesIO()
+            img.save(out, format="WEBP", quality=quality)
             return out.getvalue()
     except Exception:
         return None

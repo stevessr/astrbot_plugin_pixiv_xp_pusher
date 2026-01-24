@@ -388,6 +388,9 @@ async def main_task(
 
         # 3. 过滤
         filter_cfg = config.get("filter", {})
+        x_algorithm_cfg = config.get("x_algorithm", {})
+        use_x_algorithm = x_algorithm_cfg.get("enabled", True)
+
         # 初始化可选的 Embedder (AI 语义匹配)
         embedder = None
         ai_cfg = config.get("ai", {})
@@ -441,32 +444,69 @@ async def main_task(
             except Exception as e:
                 logger.warning(f"AIScorer 初始化失败：{e}")
 
-        content_filter = ContentFilter(
-            blacklist_tags=filter_cfg.get("blacklist_tags"),
-            daily_limit=filter_cfg.get("daily_limit", 20),
-            exclude_ai=filter_cfg.get("exclude_ai", True),
-            min_match_score=filter_cfg.get("min_match_score", 0.0),
-            match_weight=filter_cfg.get("match_weight", 0.6),
-            max_per_artist=filter_cfg.get("max_per_artist", 3),
-            subscribed_artists=all_subs,
-            artist_boost=filter_cfg.get("artist_boost", 0.3),
-            min_create_days=filter_cfg.get("min_create_days", 0),
-            r18_mode=filter_cfg.get("r18_mode", False),
-            # 新增：借鉴 X 算法的增强选项
-            author_diversity=filter_cfg.get("author_diversity"),
-            source_boost=filter_cfg.get("source_boost"),
-            embedder=embedder,  # 可选的语义匹配
-            ai_scorer=ai_scorer,  # 可选的 LLM 精排
-            # 多样性增强
-            shuffle_factor=filter_cfg.get("shuffle_factor", 0.0),
-            exploration_ratio=filter_cfg.get("exploration_ratio", 0.0),
-        )
-
+        # 获取负向画像
+        negative_profile = await db_module.get_negative_profile()
         pixiv_uid = config.get("pixiv", {}).get("user_id", 0)
-        filtered = await content_filter.filter(
-            all_illusts, xp_profile=xp_profile, user_id=pixiv_uid
-        )
-        logger.info(f"过滤后 {len(filtered)} 个作品")
+
+        # 使用 X-Algorithm 评分引擎 (新) 或 ContentFilter (旧)
+        if use_x_algorithm:
+            from x_scorer import create_scorer_from_config
+
+            x_scorer = create_scorer_from_config(
+                config,
+                embedder=embedder,
+                ai_scorer=ai_scorer,
+                xp_profile=xp_profile,
+                negative_profile=negative_profile,
+                subscribed_artists=set(all_subs),
+            )
+
+            # 先进行硬性过滤 (去重、黑名单、AI、R18)
+            content_filter = ContentFilter(
+                blacklist_tags=filter_cfg.get("blacklist_tags"),
+                daily_limit=len(all_illusts),  # 不在此处限制数量
+                exclude_ai=filter_cfg.get("exclude_ai", True),
+                min_match_score=0.0,  # 不在此处过滤分数
+                match_weight=0.0,
+                max_per_artist=999,  # 不在此处限制画师
+                subscribed_artists=all_subs,
+                artist_boost=0.0,
+                min_create_days=filter_cfg.get("min_create_days", 0),
+                r18_mode=filter_cfg.get("r18_mode", False),
+            )
+
+            # 硬性过滤
+            pre_filtered = await content_filter.filter(all_illusts, xp_profile=None)
+            logger.info(f"硬性过滤后 {len(pre_filtered)} 个作品")
+
+            # X-Algorithm 评分与排序
+            filtered = await x_scorer.score_pipeline(pre_filtered, user_id=pixiv_uid)
+            logger.info(f"[XScorer] 最终输出 {len(filtered)} 个作品")
+        else:
+            # 使用旧版 ContentFilter
+            content_filter = ContentFilter(
+                blacklist_tags=filter_cfg.get("blacklist_tags"),
+                daily_limit=filter_cfg.get("daily_limit", 20),
+                exclude_ai=filter_cfg.get("exclude_ai", True),
+                min_match_score=filter_cfg.get("min_match_score", 0.0),
+                match_weight=filter_cfg.get("match_weight", 0.6),
+                max_per_artist=filter_cfg.get("max_per_artist", 3),
+                subscribed_artists=all_subs,
+                artist_boost=filter_cfg.get("artist_boost", 0.3),
+                min_create_days=filter_cfg.get("min_create_days", 0),
+                r18_mode=filter_cfg.get("r18_mode", False),
+                author_diversity=filter_cfg.get("author_diversity"),
+                source_boost=filter_cfg.get("source_boost"),
+                embedder=embedder,
+                ai_scorer=ai_scorer,
+                shuffle_factor=filter_cfg.get("shuffle_factor", 0.0),
+                exploration_ratio=filter_cfg.get("exploration_ratio", 0.0),
+            )
+
+            filtered = await content_filter.filter(
+                all_illusts, xp_profile=xp_profile, user_id=pixiv_uid
+            )
+            logger.info(f"过滤后 {len(filtered)} 个作品")
 
         # 4. 推送
         if notifiers and filtered:
@@ -961,6 +1001,7 @@ class AstrBotNotifier:
         multi_page_mode: str = "cover_link",
         use_pixiv_cat: bool = True,
         proxy_url: str | None = None,
+        image_compression: str = "avif",
     ) -> None:
         self.context = context
         self.sessions = sessions
@@ -968,6 +1009,7 @@ class AstrBotNotifier:
         self.multi_page_mode = multi_page_mode
         self.use_pixiv_cat = use_pixiv_cat
         self.proxy_url = proxy_url
+        self.image_compression = image_compression
         self._session: aiohttp.ClientSession | None = None
 
     def _get_platform_for_session(self, session_str: str):
@@ -1026,7 +1068,7 @@ class AstrBotNotifier:
         try:
             session = await self._get_session()
             data = await download_image_with_referer(session, url, proxy=self.proxy_url)
-            return save_persistent_img(data, url=url)
+            return save_persistent_img(data, url=url, compression=self.image_compression)
         except Exception as e:
             logger.warning(
                 "下载图片失败：url=%s proxy=%s err=%s",
@@ -1360,6 +1402,7 @@ if Star is not None:
             if not sessions:
                 return False, "No push sessions configured."
             use_pixiv_cat = bool(self.plugin_config.get("use_pixiv_cat", True))
+            image_compression = str(self.plugin_config.get("image_compression", "avif"))
 
             async def _notifier_factory(_, __, ___, ____):
                 return [
@@ -1372,6 +1415,7 @@ if Star is not None:
                         ),
                         use_pixiv_cat=use_pixiv_cat,
                         proxy_url=config.get("network", {}).get("proxy_url"),
+                        image_compression=image_compression,
                     )
                 ]
 
@@ -1422,6 +1466,7 @@ if Star is not None:
             if not sessions:
                 return False, "No push sessions configured."
             use_pixiv_cat = bool(self.plugin_config.get("use_pixiv_cat", True))
+            image_compression = str(self.plugin_config.get("image_compression", "avif"))
 
             async def _notifier_factory(_, __, ___, ____):
                 return [
@@ -1434,6 +1479,7 @@ if Star is not None:
                         ),
                         use_pixiv_cat=use_pixiv_cat,
                         proxy_url=config.get("network", {}).get("proxy_url"),
+                        image_compression=image_compression,
                     )
                 ]
 
@@ -1513,6 +1559,7 @@ if Star is not None:
             )
 
             use_pixiv_cat = bool(self.plugin_config.get("use_pixiv_cat", True))
+            image_compression = str(self.plugin_config.get("image_compression", "avif"))
             notifier = AstrBotNotifier(
                 context=self.context,
                 sessions=sessions,
@@ -1522,6 +1569,7 @@ if Star is not None:
                 ),
                 use_pixiv_cat=use_pixiv_cat,
                 proxy_url=network_cfg.get("proxy_url"),
+                image_compression=image_compression,
             )
 
             try:
@@ -1717,6 +1765,7 @@ if Star is not None:
             exclude_ai = bool(filter_cfg.get("exclude_ai", True))
             use_pixiv_cat = bool(self.plugin_config.get("use_pixiv_cat", True))
             max_pages = int(config.get("notifier", {}).get("max_pages", 10))
+            image_compression = str(self.plugin_config.get("image_compression", "avif"))
 
             client = PixivClient(
                 refresh_token=token,
@@ -1817,7 +1866,9 @@ if Star is not None:
                                 session, url, proxy=proxy_url
                             )
                             if img_data:
-                                path = save_persistent_img(img_data, url=url)
+                                path = save_persistent_img(
+                                    img_data, url=url, compression=image_compression
+                                )
                                 if event.get_platform_name() == "telegram":
                                     result = event.chain_result(
                                         [
