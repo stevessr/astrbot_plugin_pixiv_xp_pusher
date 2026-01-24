@@ -33,8 +33,34 @@
   },
   "strategies": {
     "description": "启用的策略列表",
-    "type": "list",
-    "default": ["xp_search", "related", "ranking", "subscription"]
+    "type": "object",
+    "items": {
+      "xp_search": {
+        "description": "XP 标签搜索",
+        "type": "bool",
+        "default": true
+      },
+      "subscription": {
+        "description": "关注画师动态",
+        "type": "bool",
+        "default": true
+      },
+      "ranking": {
+        "description": "排行榜",
+        "type": "bool",
+        "default": true
+      },
+      "related": {
+        "description": "关联推荐",
+        "type": "bool",
+        "default": true
+      },
+      "engagement_artists": {
+        "description": "互动画师",
+        "type": "bool",
+        "default": false
+      }
+    }
   },
   "ai": {
     "description": "AI 增强功能",
@@ -480,12 +506,64 @@
           },
           "modes": {
             "description": "排行榜模式",
-            "type": "list",
-            "default": ["day", "week", "month"]
+            "type": "object",
+            "condition": {
+              "enabled": true
+            },
+            "items": {
+              "day": {
+                "description": "每日排行",
+                "type": "bool",
+                "default": true
+              },
+              "week": {
+                "description": "每周排行",
+                "type": "bool",
+                "default": true
+              },
+              "month": {
+                "description": "每月排行",
+                "type": "bool",
+                "default": true
+              },
+              "day_male": {
+                "description": "每日男性向",
+                "type": "bool",
+                "default": false
+              },
+              "day_female": {
+                "description": "每日女性向",
+                "type": "bool",
+                "default": false
+              },
+              "week_original": {
+                "description": "每周原创",
+                "type": "bool",
+                "default": false
+              },
+              "week_rookie": {
+                "description": "每周新人",
+                "type": "bool",
+                "default": false
+              },
+              "day_r18": {
+                "description": "每日 R-18",
+                "type": "bool",
+                "default": false
+              },
+              "week_r18": {
+                "description": "每周 R-18",
+                "type": "bool",
+                "default": false
+              }
+            }
           },
           "limit": {
             "description": "排行榜拉取数量",
             "type": "int",
+            "condition": {
+              "enabled": true
+            },
             "default": 100
           }
         }
