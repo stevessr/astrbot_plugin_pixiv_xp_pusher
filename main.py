@@ -1007,21 +1007,11 @@ class AstrBotNotifier:
             return None, session
         return None, session
 
-    def _is_telegram_session(self, session_str: str) -> bool:
-        try:
-            session = MessageSesion.from_str(session_str)
-            return session.platform_id == "telegram"
-        except Exception:
-            return session_str.startswith("telegram:")
-
     def _append_image_component(
         self, chain: MessageChain, session_str: str, path: str
     ) -> None:
-        if self._is_telegram_session(session_str):
-            name = os.path.basename(path) or "image.jpg"
-            chain.chain.append(File(name=name, file=path))
-        else:
-            chain.file_image(path)
+        # Telegram 平台优先以图片形式发送
+        chain.file_image(path)
 
     def _pick_image_urls(self, illust: Illust) -> list[str]:
         if not illust.page_count:
