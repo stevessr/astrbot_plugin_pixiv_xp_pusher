@@ -56,6 +56,19 @@ class AIScorer:
 返回 JSON 数组，格式：[{{"id": 123, "score": 0.85}}]
 只返回 JSON，不要解释。根据标签与用户偏好的匹配程度评分。"""
 
+    @staticmethod
+    def _provider_model(provider: Provider) -> str:
+        try:
+            meta_model = provider.meta().model
+            if meta_model:
+                return str(meta_model)
+        except Exception:
+            pass
+        try:
+            return str(provider.get_model() or "")
+        except Exception:
+            return ""
+
     def __init__(self, config: dict, provider: Provider | None = None):
         """
         初始化 AI 评分器
@@ -65,7 +78,7 @@ class AIScorer:
         """
         self.enabled = config.get("enabled", False)
         self.provider = config.get("provider", "astrbot")
-        self.model = config.get("model") or ""
+        self.model = ""
         self.max_candidates = config.get("max_candidates", 50)
         self.score_weight = config.get("score_weight", 0.3)
         self.vision_enabled = bool(config.get("vision_enabled", False))
@@ -77,13 +90,7 @@ class AIScorer:
             return
 
         if self._provider is not None:
-            if not self.model:
-                try:
-                    self.model = (
-                        self._provider.get_model() or self._provider.meta().model or ""
-                    )
-                except Exception:
-                    self.model = ""
+            self.model = self._provider_model(self._provider)
             provider_id = "unknown"
             try:
                 provider_id = self._provider.meta().id
@@ -170,7 +177,6 @@ class AIScorer:
                 prompt=prompt,
                 image_urls=image_urls or None,
                 system_prompt="你是推荐系统评分器，只返回 JSON 数组，不要解释。",
-                model=self.model or None,
                 temperature=0.3,
                 max_tokens=1000,
                 persist=False,

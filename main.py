@@ -497,8 +497,6 @@ async def main_task(
                         or profiler_ai_cfg.get("provider_id", ""),
                         "provider": scorer_cfg.get("provider")
                         or profiler_ai_cfg.get("provider", "astrbot"),
-                        "model": scorer_cfg.get("model")
-                        or profiler_ai_cfg.get("model", ""),
                         "max_candidates": scorer_cfg.get("max_candidates", 50),
                         "score_weight": scorer_cfg.get("score_weight", 0.3),
                         "vision_enabled": scorer_cfg.get("vision_enabled", False),
@@ -1039,7 +1037,6 @@ def _build_config_from_astrbot(plugin_cfg: AstrBotConfig) -> dict:
                 "enabled": profiler_ai_cfg.get("enabled", False),
                 "provider_id": profiler_ai_cfg.get("provider_id", ""),
                 "provider": profiler_ai_cfg.get("provider", "astrbot"),
-                "model": profiler_ai_cfg.get("model", ""),
                 "concurrency": profiler_ai_cfg.get("concurrency", 10),
                 "batch_size": profiler_ai_cfg.get("batch_size", 200),
                 "filter_meaningless": profiler_ai_cfg.get("filter_meaningless", True),

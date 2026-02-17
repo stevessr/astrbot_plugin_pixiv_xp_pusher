@@ -36,6 +36,19 @@ class Embedder:
     3. 相似度计算 (余弦相似度)
     """
 
+    @staticmethod
+    def _provider_model(provider: EmbeddingProvider) -> str:
+        try:
+            meta_model = provider.meta().model
+            if meta_model:
+                return str(meta_model)
+        except Exception:
+            pass
+        try:
+            return str(provider.get_model() or "")
+        except Exception:
+            return ""
+
     def __init__(self, config: dict, provider: EmbeddingProvider | None = None):
         """
         初始化 Embedder
@@ -45,7 +58,7 @@ class Embedder:
         """
         self.enabled = config.get("enabled", False)
         self.provider = config.get("provider", "astrbot")
-        self.model = config.get("model", "")
+        self.model = ""
         self.dimensions = config.get("dimensions", 256)
         self.semantic_weight = config.get("semantic_weight", 0.3)
         self.cache_ttl_days = config.get("cache_ttl_days", 30)
@@ -62,15 +75,7 @@ class Embedder:
             except Exception:
                 provider_id = "unknown"
 
-            if not self.model:
-                try:
-                    self.model = (
-                        self._provider.get_model()
-                        or self._provider.meta().model
-                        or provider_id
-                    )
-                except Exception:
-                    self.model = provider_id
+            self.model = self._provider_model(self._provider) or provider_id
             try:
                 self.dimensions = int(self._provider.get_dim())
             except Exception:

@@ -47,12 +47,25 @@ TAG_ALIASES = {
 class AITagProcessor:
     """AI Tag 处理器 - 过滤无意义 tag 和归类同义 tag"""
 
+    @staticmethod
+    def _provider_model(provider: Provider) -> str:
+        try:
+            meta_model = provider.meta().model
+            if meta_model:
+                return str(meta_model)
+        except Exception:
+            pass
+        try:
+            return str(provider.get_model() or "")
+        except Exception:
+            return ""
+
     def __init__(self, config: dict, provider: Provider | None = None):
         self._provider = provider
         self.enabled = bool(config.get("enabled", False))
         self.filter_meaningless = config.get("filter_meaningless", True)
         self.merge_synonyms = config.get("merge_synonyms", True)
-        self.model = config.get("model") or ""
+        self.model = ""
         self.batch_size = config.get("batch_size", 50)
         self.concurrency = config.get("concurrency", 3)  # 并发数
         self.pattern_users = re.compile(r"^(.*?)\d+users 入り$")  # 预编译正则
@@ -64,13 +77,7 @@ class AITagProcessor:
             return
 
         if self._provider is not None:
-            if not self.model:
-                try:
-                    self.model = (
-                        self._provider.get_model() or self._provider.meta().model or ""
-                    )
-                except Exception:
-                    self.model = ""
+            self.model = self._provider_model(self._provider)
             provider_id = "unknown"
             try:
                 provider_id = self._provider.meta().id
@@ -168,7 +175,6 @@ class AITagProcessor:
             resp = await self._provider.text_chat(
                 prompt=prompt,
                 system_prompt="你是一个 Pixiv 插画标签数据处理专家，只输出标准 JSON。",
-                model=self.model or None,
                 temperature=0.1,
                 persist=False,
             )

@@ -92,14 +92,6 @@
             "options": ["astrbot"],
             "default": "astrbot"
           },
-          "model": {
-            "description": "Embedding 模型名（可留空，使用 Provider 默认模型）",
-            "type": "string",
-            "condition": {
-              "enabled": true
-            },
-            "default": ""
-          },
           "dimensions": {
             "description": "向量维度",
             "type": "int",
@@ -151,14 +143,6 @@
             },
             "options": ["astrbot"],
             "default": "astrbot"
-          },
-          "model": {
-            "description": "LLM 模型名",
-            "type": "string",
-            "condition": {
-              "ai.scorer.enabled": true
-            },
-            "default": ""
           },
           "max_candidates": {
             "description": "最大候选数量",
@@ -630,14 +614,6 @@
             "type": "string",
             "options": ["astrbot"],
             "default": "astrbot",
-            "condition": {
-              "enabled": true
-            }
-          },
-          "model": {
-            "description": "模型名称",
-            "type": "string",
-            "default": "",
             "condition": {
               "enabled": true
             }

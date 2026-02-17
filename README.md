@@ -13,6 +13,7 @@
    - 如需启用 Embedding/AI 精排，插件将直接使用 AstrBot Provider：
      - 可在 `profiler.ai.provider_id` / `ai.embedding.provider_id` / `ai.scorer.provider_id` 指定 Provider ID
      - 不填写 `provider_id` 时会自动回退到当前对话 Provider（Embedding 使用第一个可用 Embedding Provider）
+     - 模型跟随 Provider 当前配置，无需在插件中单独填写 model
 2. 启动插件：`/pixivxp start`
 
 ## 常用指令
