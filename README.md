@@ -10,7 +10,9 @@
    - `pixiv.refresh_token` 和 `pixiv.user_id`
    - 设置主动推送会话：
      - 填写 `push_sessions`（umo 列表）
-   - 如需启用 Embedding/AI 精排，请在 `ai.embedding` / `ai.scorer` 中填写 `provider/api_key/base_url/model`
+   - 如需启用 Embedding/AI 精排，插件将直接使用 AstrBot Provider：
+     - 可在 `profiler.ai.provider_id` / `ai.embedding.provider_id` / `ai.scorer.provider_id` 指定 Provider ID
+     - 不填写 `provider_id` 时会自动回退到当前对话 Provider（Embedding 使用第一个可用 Embedding Provider）
 2. 启动插件：`/pixivxp start`
 
 ## 常用指令
@@ -28,7 +30,6 @@
 
 ## 可选依赖
 
-- 如未启用 AstrBot Provider，可自行安装 `openai` 以使用 AI 标签清洗/精排
 - 如需本地转换动图（ugoira），请安装 `Pillow` 与 `imageio[ffmpeg]`
 
 只在 matrix 平台适配器做过测试

@@ -1,38 +1,17 @@
 """
 AI Embedding 模块
 
-使用第三方 API 计算文本向量，支持语义匹配。
+使用 AstrBot Embedding Provider 计算文本向量，支持语义匹配。
 借鉴 X 算法 Two-Tower Model 的理念。
-
-支持的 Provider:
-- openai: OpenAI / DeepSeek / 兼容 API
-- local: 本地 sentence-transformers 模型 (需要额外安装)
 """
 
 from __future__ import annotations
 
-import asyncio
 import math
 from dataclasses import dataclass
 
 from astrbot.api import logger
-
-# 尝试导入 OpenAI 客户端
-try:
-    from openai import AsyncOpenAI
-
-    HAS_OPENAI = True
-except ImportError:
-    HAS_OPENAI = False
-    logger.warning("openai 未安装，Embedding 功能将不可用")
-
-# 尝试导入本地模型
-try:
-    from sentence_transformers import SentenceTransformer
-
-    HAS_LOCAL_MODEL = True
-except ImportError:
-    HAS_LOCAL_MODEL = False
+from astrbot.core.provider.provider import EmbeddingProvider
 
 
 @dataclass
@@ -40,11 +19,9 @@ class EmbeddingConfig:
     """Embedding 配置"""
 
     enabled: bool = False
-    provider: str = "openai"  # openai | local
-    model: str = "text-embedding-3-small"  # OpenAI 模型或本地模型名
-    api_key: str = ""
-    base_url: str = ""
-    dimensions: int = 256  # 向量维度 (OpenAI 支持 256/512/1024/1536)
+    provider: str = "astrbot"
+    model: str = ""
+    dimensions: int = 256
     cache_ttl_days: int = 30  # 缓存天数
     semantic_weight: float = 0.3  # 语义匹配在最终分数中的权重
 
@@ -59,7 +36,7 @@ class Embedder:
     3. 相似度计算 (余弦相似度)
     """
 
-    def __init__(self, config: dict):
+    def __init__(self, config: dict, provider: EmbeddingProvider | None = None):
         """
         初始化 Embedder
 
@@ -67,52 +44,50 @@ class Embedder:
             config: ai.embedding 配置块
         """
         self.enabled = config.get("enabled", False)
-        self.provider = config.get("provider", "openai")
-        self.model = config.get("model", "text-embedding-3-small")
+        self.provider = config.get("provider", "astrbot")
+        self.model = config.get("model", "")
         self.dimensions = config.get("dimensions", 256)
         self.semantic_weight = config.get("semantic_weight", 0.3)
         self.cache_ttl_days = config.get("cache_ttl_days", 30)
 
-        self._client = None
-        self._local_model = None
+        self._provider = provider
 
         if not self.enabled:
             return
 
-        if self.provider == "openai":
-            if not HAS_OPENAI:
-                logger.error("openai 库未安装，无法使用 OpenAI Embedding")
-                self.enabled = False
-                return
-
-            api_key = config.get("api_key", "")
-            base_url = config.get("base_url", "")
-
-            if not api_key:
-                logger.warning("未配置 Embedding API Key，功能已禁用")
-                self.enabled = False
-                return
-
-            self._client = AsyncOpenAI(api_key=api_key, base_url=base_url or None)
-            logger.info(
-                f"Embedder 已初始化 (provider={self.provider}, model={self.model})"
-            )
-
-        elif self.provider == "local":
-            if not HAS_LOCAL_MODEL:
-                logger.error("sentence-transformers 未安装，无法使用本地模型")
-                self.enabled = False
-                return
-
+        if self._provider is not None:
             try:
-                self._local_model = SentenceTransformer(self.model)
-                logger.info(f"本地 Embedding 模型已加载：{self.model}")
-            except Exception as e:
-                logger.error(f"加载本地模型失败：{e}")
-                self.enabled = False
-        else:
-            logger.error(f"不支持的 Embedding Provider: {self.provider}")
-            self.enabled = False
+                meta = self._provider.meta()
+                provider_id = meta.id
+            except Exception:
+                provider_id = "unknown"
+
+            if not self.model:
+                try:
+                    self.model = (
+                        self._provider.get_model()
+                        or self._provider.meta().model
+                        or provider_id
+                    )
+                except Exception:
+                    self.model = provider_id
+            try:
+                self.dimensions = int(self._provider.get_dim())
+            except Exception:
+                pass
+            self.provider = "astrbot"
+            logger.info(
+                "Embedder initialized with AstrBot provider (provider_id=%s, model=%s, dim=%s)",
+                provider_id,
+                self.model,
+                self.dimensions,
+            )
+            return
+
+        logger.warning(
+            "Embedding enabled but no AstrBot embedding provider available, disabling."
+        )
+        self.enabled = False
 
     async def embed_text(self, text: str) -> list[float] | None:
         """
@@ -128,22 +103,12 @@ class Embedder:
             return None
 
         try:
-            if self.provider == "openai":
-                response = await self._client.embeddings.create(
-                    model=self.model, input=text, dimensions=self.dimensions
-                )
-                return response.data[0].embedding
-
-            elif self.provider == "local":
-                # sentence-transformers 是同步的，用 run_in_executor 包装
-                loop = asyncio.get_event_loop()
-                embedding = await loop.run_in_executor(
-                    None,
-                    lambda: self._local_model.encode(
-                        text, normalize_embeddings=True
-                    ).tolist(),
-                )
-                return embedding
+            if self._provider is None:
+                return None
+            vector = await self._provider.get_embedding(text)
+            if not vector:
+                return None
+            return [float(v) for v in vector]
 
         except Exception as e:
             logger.error(f"Embedding 计算失败：{e}")
@@ -191,23 +156,15 @@ class Embedder:
             return [None] * len(texts)
 
         try:
-            if self.provider == "openai":
-                response = await self._client.embeddings.create(
-                    model=self.model, input=texts, dimensions=self.dimensions
-                )
-                # 按 index 排序确保顺序正确
-                sorted_data = sorted(response.data, key=lambda x: x.index)
-                return [item.embedding for item in sorted_data]
-
-            elif self.provider == "local":
-                loop = asyncio.get_event_loop()
-                embeddings = await loop.run_in_executor(
-                    None,
-                    lambda: self._local_model.encode(
-                        texts, normalize_embeddings=True
-                    ).tolist(),
-                )
-                return embeddings
+            if self._provider is None:
+                return [None] * len(texts)
+            vectors = await self._provider.get_embeddings(texts)
+            normalized: list[list[float] | None] = [
+                [float(v) for v in vec] if vec else None for vec in vectors
+            ]
+            if len(normalized) < len(texts):
+                normalized.extend([None] * (len(texts) - len(normalized)))
+            return normalized[: len(texts)]
 
         except Exception as e:
             try:
@@ -222,7 +179,7 @@ class Embedder:
                     len(texts),
                     (
                         f"{min(lengths) if lengths else 0}/"
-                        f"{(sum(lengths)//len(lengths)) if lengths else 0}/"
+                        f"{(sum(lengths) // len(lengths)) if lengths else 0}/"
                         f"{max(lengths) if lengths else 0}"
                     ),
                     sample,

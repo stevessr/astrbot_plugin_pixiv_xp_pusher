@@ -75,38 +75,28 @@
             "type": "bool",
             "default": false
           },
-          "provider": {
-            "description": "Embedding Provider (openai/local)",
+          "provider_id": {
+            "description": "AstrBot Embedding Provider ID（留空自动使用第一个可用 Embedding Provider）",
             "type": "string",
             "condition": {
               "enabled": true
-            },
-            "options": ["openai", "local"],
-            "default": "openai"
-          },
-          "model": {
-            "description": "Embedding 模型名（OpenAI 或本地模型名）",
-            "type": "string",
-            "condition": {
-              "enabled": true
-            },
-            "default": "text-embedding-3-small"
-          },
-          "api_key": {
-            "description": "Embedding API Key",
-            "type": "string",
-            "condition": {
-              "enabled": true,
-              "provider": "openai"
             },
             "default": ""
           },
-          "base_url": {
-            "description": "Embedding API Base URL",
+          "provider": {
+            "description": "Embedding 后端（固定使用 astrbot）",
             "type": "string",
             "condition": {
-              "enabled": true,
-              "provider": "openai"
+              "enabled": true
+            },
+            "options": ["astrbot"],
+            "default": "astrbot"
+          },
+          "model": {
+            "description": "Embedding 模型名（可留空，使用 Provider 默认模型）",
+            "type": "string",
+            "condition": {
+              "enabled": true
             },
             "default": ""
           },
@@ -145,32 +135,25 @@
             "type": "bool",
             "default": false
           },
-          "provider": {
-            "description": "LLM Provider（openai 等兼容 API）",
+          "provider_id": {
+            "description": "AstrBot Chat Provider ID（留空自动使用当前对话 Provider）",
             "type": "string",
             "condition": {
               "ai.scorer.enabled": true
             },
-            "default": "openai"
+            "default": ""
+          },
+          "provider": {
+            "description": "LLM 后端（固定使用 astrbot）",
+            "type": "string",
+            "condition": {
+              "ai.scorer.enabled": true
+            },
+            "options": ["astrbot"],
+            "default": "astrbot"
           },
           "model": {
             "description": "LLM 模型名",
-            "type": "string",
-            "condition": {
-              "ai.scorer.enabled": true
-            },
-            "default": ""
-          },
-          "api_key": {
-            "description": "LLM API Key",
-            "type": "string",
-            "condition": {
-              "ai.scorer.enabled": true
-            },
-            "default": ""
-          },
-          "base_url": {
-            "description": "LLM API Base URL",
             "type": "string",
             "condition": {
               "ai.scorer.enabled": true
@@ -634,26 +617,19 @@
             "type": "bool",
             "default": false
           },
+          "provider_id": {
+            "description": "AstrBot Chat Provider ID（留空自动使用当前对话 Provider）",
+            "type": "string",
+            "default": "",
+            "condition": {
+              "enabled": true
+            }
+          },
           "provider": {
-            "description": "AI 提供商",
+            "description": "AI 后端（固定使用 astrbot）",
             "type": "string",
-            "default": "openai",
-            "condition": {
-              "enabled": true
-            }
-          },
-          "api_key": {
-            "description": "API Key",
-            "type": "string",
-            "default": "",
-            "condition": {
-              "enabled": true
-            }
-          },
-          "base_url": {
-            "description": "API Base URL",
-            "type": "string",
-            "default": "",
+            "options": ["astrbot"],
+            "default": "astrbot",
             "condition": {
               "enabled": true
             }

@@ -225,6 +225,7 @@ def save_persistent_img(
 def encode_avif_bytes(data: bytes, quality: int = 50) -> bytes | None:
     try:
         from PIL import Image
+
         try:
             import pillow_avif  # noqa: F401
         except ImportError:

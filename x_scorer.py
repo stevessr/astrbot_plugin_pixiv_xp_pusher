@@ -151,7 +151,7 @@ class XScorer:
         if not candidates:
             return []
 
-        logger.info(f"[XScorer] 开始评分管道，候选数: {len(candidates)}")
+        logger.info(f"[XScorer] 开始评分管道，候选数：{len(candidates)}")
 
         # 1. 初始化统计量
         self._max_bookmark = max(c.bookmark_count for c in candidates) or 1
@@ -161,15 +161,15 @@ class XScorer:
 
         # 3. Light Ranker (快速粗排)
         scored = await self._light_rank(scored)
-        logger.debug(f"[XScorer] Light Ranker 完成，剩余: {len(scored)}")
+        logger.debug(f"[XScorer] Light Ranker 完成，剩余：{len(scored)}")
 
         # 4. Heavy Ranker (精排)
         scored = await self._heavy_rank(scored, user_id)
-        logger.debug(f"[XScorer] Heavy Ranker 完成")
+        logger.debug("[XScorer] Heavy Ranker 完成")
 
         # 5. Final Mixer (多样性 + 探索)
         result = self._final_mix(scored)
-        logger.info(f"[XScorer] 管道完成，输出: {len(result)}")
+        logger.info(f"[XScorer] 管道完成，输出：{len(result)}")
 
         # 6. 附加分数到原始对象
         for item in result:
@@ -181,7 +181,7 @@ class XScorer:
         """
         Light Ranker: 快速粗排
 
-        计算低成本特征:
+        计算低成本特征：
         - Tag 匹配度
         - 热度归一化
         - 时效性
@@ -237,7 +237,7 @@ class XScorer:
         """
         Heavy Ranker: 精排
 
-        计算高成本特征:
+        计算高成本特征：
         - 语义 Embedding 相似度
         - Like Ratio (点赞率)
         - AI Scorer (LLM 精排)
@@ -297,7 +297,7 @@ class XScorer:
             uid = item.illust.user_id
             pos = author_position.get(uid, 0)
 
-            # 衰减公式: (1 - floor) * decay^pos + floor
+            # 衰减公式：(1 - floor) * decay^pos + floor
             decay_mult = (1.0 - w.author_diversity_floor) * (
                 w.author_diversity_decay**pos
             ) + w.author_diversity_floor
@@ -348,7 +348,7 @@ class XScorer:
             for item in explore_result:
                 item.is_exploration = True
 
-            logger.info(f"[XScorer] 探索混入: {len(explore_result)} 个")
+            logger.info(f"[XScorer] 探索混入：{len(explore_result)} 个")
 
         # 6. 合并并打散
         final_result = main_result + explore_result
@@ -429,8 +429,8 @@ class XScorer:
         """
         计算时效性分数 (指数衰减)
 
-        半衰期: 7 天
-        公式: e^(-days / decay_days)
+        半衰期：7 天
+        公式：e^(-days / decay_days)
         """
         if not illust.create_date:
             return 0.5
@@ -509,14 +509,16 @@ class XScorer:
                     await db.save_illust_embeddings_batch(to_save)
 
         except Exception as e:
-            logger.warning(f"[XScorer] 语义匹配失败: {e}")
+            logger.warning(f"[XScorer] 语义匹配失败：{e}")
 
     async def _apply_ai_scorer(self, scored: list[ScoredIllust]) -> None:
         """应用 AI Scorer (LLM 精排)"""
         import database as db
 
         try:
-            candidates = [item.illust for item in scored[: self.ai_scorer.max_candidates]]
+            candidates = [
+                item.illust for item in scored[: self.ai_scorer.max_candidates]
+            ]
             if len(candidates) < 5:
                 return
 
@@ -534,13 +536,14 @@ class XScorer:
                     if ai_score is not None:
                         # 加权混合
                         item.heavy_rank_score = (
-                            1 - self.ai_scorer.score_weight
-                        ) * item.heavy_rank_score + self.ai_scorer.score_weight * ai_score
+                            (1 - self.ai_scorer.score_weight) * item.heavy_rank_score
+                            + self.ai_scorer.score_weight * ai_score
+                        )
 
-                logger.info(f"[XScorer] AI 精排已应用: {len(ai_scores)} 个")
+                logger.info(f"[XScorer] AI 精排已应用：{len(ai_scores)} 个")
 
         except Exception as e:
-            logger.warning(f"[XScorer] AI 精排失败: {e}")
+            logger.warning(f"[XScorer] AI 精排失败：{e}")
 
 
 def create_scorer_from_config(

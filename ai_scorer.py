@@ -19,14 +19,7 @@ from dataclasses import dataclass
 from utils import download_image_with_referer, get_pixiv_cat_url, save_persistent_img
 
 from astrbot.api import logger
-
-# 尝试导入 OpenAI 客户端
-try:
-    from openai import AsyncOpenAI
-
-    HAS_OPENAI = True
-except ImportError:
-    HAS_OPENAI = False
+from astrbot.api.provider import Provider
 
 
 @dataclass
@@ -34,10 +27,8 @@ class AIScoreConfig:
     """AI 评分配置"""
 
     enabled: bool = False
-    provider: str = "openai"
+    provider: str = "astrbot"
     model: str = ""
-    api_key: str = ""
-    base_url: str = ""
     max_candidates: int = 50  # 超过此数量时跳过 AI 评分
     score_weight: float = 0.3  # AI 分数在最终排序中的权重
     vision_enabled: bool = False
@@ -65,7 +56,7 @@ class AIScorer:
 返回 JSON 数组，格式：[{{"id": 123, "score": 0.85}}]
 只返回 JSON，不要解释。根据标签与用户偏好的匹配程度评分。"""
 
-    def __init__(self, config: dict):
+    def __init__(self, config: dict, provider: Provider | None = None):
         """
         初始化 AI 评分器
 
@@ -73,7 +64,7 @@ class AIScorer:
             config: ai.scorer 配置块
         """
         self.enabled = config.get("enabled", False)
-        self.provider = config.get("provider", "openai")
+        self.provider = config.get("provider", "astrbot")
         self.model = config.get("model") or ""
         self.max_candidates = config.get("max_candidates", 50)
         self.score_weight = config.get("score_weight", 0.3)
@@ -81,30 +72,34 @@ class AIScorer:
         self.image_max_bytes = int(config.get("image_max_bytes", 2000000))
         self.proxy_url = config.get("proxy_url", "")
 
-        self._client = None
+        self._provider = provider
         if not self.enabled:
             return
 
-        if not HAS_OPENAI:
-            logger.error("openai 库未安装，AI 评分功能将不可用")
-            self.enabled = False
+        if self._provider is not None:
+            if not self.model:
+                try:
+                    self.model = (
+                        self._provider.get_model() or self._provider.meta().model or ""
+                    )
+                except Exception:
+                    self.model = ""
+            provider_id = "unknown"
+            try:
+                provider_id = self._provider.meta().id
+            except Exception:
+                pass
+            logger.info(
+                "AI Scorer initialized with AstrBot provider (provider_id=%s, model=%s)",
+                provider_id,
+                self.model or "default",
+            )
             return
 
-        if not self.model:
-            logger.warning("未配置 AI Scorer model，功能已禁用")
-            self.enabled = False
-            return
-
-        api_key = config.get("api_key", "")
-        base_url = config.get("base_url", "")
-
-        if not api_key:
-            logger.warning("未配置 AI Scorer API Key，功能已禁用")
-            self.enabled = False
-            return
-
-        self._client = AsyncOpenAI(api_key=api_key, base_url=base_url or None)
-        logger.info(f"AI Scorer 已初始化 (model={self.model})")
+        logger.warning(
+            "AI Scorer enabled but no AstrBot chat provider available, disabling."
+        )
+        self.enabled = False
 
     async def score_candidates(
         self,
@@ -159,43 +154,28 @@ class AIScorer:
                 candidates="\n".join(candidate_lines),
             )
 
-            messages = [{"role": "user", "content": prompt}]
-
+            image_payloads: list[tuple[int, str]] = []
             if self.vision_enabled:
                 image_payloads = await self._build_image_payloads(candidates)
                 if image_payloads:
                     order = ", ".join(str(iid) for iid, _ in image_payloads)
-                    messages = [
-                        {
-                            "role": "user",
-                            "content": [
-                                {
-                                    "type": "text",
-                                    "text": (
-                                        prompt
-                                        + "\n\n候选图片顺序如下（与候选列表对应）："
-                                        f"{order}"
-                                    ),
-                                },
-                                *[
-                                    {
-                                        "type": "image_url",
-                                        "image_url": {"url": data_url},
-                                    }
-                                    for _, data_url in image_payloads
-                                ],
-                            ],
-                        }
-                    ]
+                    prompt += f"\n\n候选图片顺序如下（与候选列表对应）：{order}"
 
-            response = await self._client.chat.completions.create(
-                model=self.model,
-                messages=messages,
+            if self._provider is None:
+                raise RuntimeError("AstrBot chat provider is required")
+            image_urls = [
+                self._to_provider_image_url(data_url) for _, data_url in image_payloads
+            ]
+            response = await self._provider.text_chat(
+                prompt=prompt,
+                image_urls=image_urls or None,
+                system_prompt="你是推荐系统评分器，只返回 JSON 数组，不要解释。",
+                model=self.model or None,
                 temperature=0.3,
                 max_tokens=1000,
+                persist=False,
             )
-
-            content = response.choices[0].message.content.strip()
+            content = (response.completion_text or "").strip()
 
             # 解析 JSON
             # 尝试提取 JSON 数组
@@ -222,6 +202,13 @@ class AIScorer:
         except Exception as e:
             logger.error(f"AI 评分失败：{e}")
             return {}
+
+    @staticmethod
+    def _to_provider_image_url(data_url: str) -> str:
+        prefix = "data:image/jpeg;base64,"
+        if data_url.startswith(prefix):
+            return f"base64://{data_url[len(prefix) :]}"
+        return data_url
 
     async def _build_image_payloads(self, candidates: list) -> list[tuple[int, str]]:
         if not candidates:

@@ -25,8 +25,10 @@ from utils import download_image_with_referer, get_pixiv_cat_url, save_persisten
 from astrbot.api import AstrBotConfig, logger
 from astrbot.api.event import AstrMessageEvent, MessageChain, filter
 from astrbot.api.message_components import Image, Plain, Reply
+from astrbot.api.provider import Provider
 from astrbot.api.star import Context, Star
 from astrbot.core.platform.astr_message_event import MessageSesion
+from astrbot.core.provider.provider import EmbeddingProvider
 from astrbot.core.star.filter.command import GreedyStr
 
 if TYPE_CHECKING:
@@ -225,6 +227,57 @@ async def retry_async(
 _task_lock = asyncio.Lock()
 
 
+def _resolve_chat_provider(
+    context: Context | None,
+    provider_id: str | None = None,
+    purpose: str = "llm",
+) -> Provider | None:
+    if context is None:
+        return None
+
+    requested = str(provider_id or "").strip()
+    if requested:
+        provider = context.get_provider_by_id(requested)
+        if isinstance(provider, Provider):
+            return provider
+        logger.warning("[%s] chat provider_id 无效：%s", purpose, requested)
+
+    try:
+        provider = context.get_using_provider()
+        if isinstance(provider, Provider):
+            return provider
+    except Exception as exc:
+        logger.warning("[%s] 获取当前会话 provider 失败：%s", purpose, exc)
+
+    providers = context.get_all_providers()
+    if providers:
+        return providers[0]
+    logger.warning("[%s] 未找到可用的 Chat Provider", purpose)
+    return None
+
+
+def _resolve_embedding_provider(
+    context: Context | None,
+    provider_id: str | None = None,
+    purpose: str = "embedding",
+) -> EmbeddingProvider | None:
+    if context is None:
+        return None
+
+    requested = str(provider_id or "").strip()
+    if requested:
+        provider = context.get_provider_by_id(requested)
+        if isinstance(provider, EmbeddingProvider):
+            return provider
+        logger.warning("[%s] embedding provider_id 无效：%s", purpose, requested)
+
+    providers = context.get_all_embedding_providers()
+    if providers:
+        return providers[0]
+    logger.warning("[%s] 未找到可用的 Embedding Provider", purpose)
+    return None
+
+
 async def setup_notifiers(
     config: dict,
     client: PixivClient,
@@ -236,7 +289,11 @@ async def setup_notifiers(
     )
 
 
-async def setup_services(config: dict, notifiers_factory=None):
+async def setup_services(
+    config: dict,
+    notifiers_factory=None,
+    context: Context | None = None,
+):
     """初始化全局服务 (DB, Client, Profiler, Notifiers)"""
     await init_db()
 
@@ -270,12 +327,19 @@ async def setup_services(config: dict, notifiers_factory=None):
 
     # Init Profiler (使用 sync_client，只读操作)
     profiler_cfg = config.get("profiler", {})
+    profiler_ai_cfg = profiler_cfg.get("ai", {}) or {}
+    profiler_ai_provider = _resolve_chat_provider(
+        context,
+        profiler_ai_cfg.get("provider_id", ""),
+        purpose="profiler.ai",
+    )
     profiler = XPProfiler(
         client=sync_client,  # 使用同步客户端获取收藏
         stop_words=profiler_cfg.get("stop_words"),
         discovery_rate=profiler_cfg.get("discovery_rate", 0.1),
         time_decay_days=profiler_cfg.get("time_decay_days", 180),
-        ai_config=profiler_cfg.get("ai"),
+        ai_config=profiler_ai_cfg,
+        ai_provider=profiler_ai_provider,
         saturation_threshold=profiler_cfg.get("saturation_threshold", 0.5),
     )
 
@@ -295,6 +359,7 @@ async def main_task(
     profiler: XPProfiler,
     notifiers: list,
     sync_client: PixivClient = None,
+    context: Context | None = None,
 ):
     """
     执行一次完整的推送任务 (依赖外部服务)
@@ -399,9 +464,18 @@ async def main_task(
             try:
                 from embedder import Embedder
 
-                embedder = Embedder(embedding_cfg)
+                embedding_provider = _resolve_embedding_provider(
+                    context,
+                    embedding_cfg.get("provider_id", ""),
+                    purpose="ai.embedding",
+                )
+                embedder = Embedder(embedding_cfg, provider=embedding_provider)
                 if embedder.enabled:
-                    logger.info(f"已启用 AI 语义匹配 (model={embedder.model})")
+                    logger.info(
+                        "已启用 AI 语义匹配 (provider=%s, model=%s)",
+                        embedder.provider,
+                        embedder.model,
+                    )
             except Exception as e:
                 logger.warning(f"Embedder 初始化失败：{e}")
 
@@ -419,12 +493,10 @@ async def main_task(
                     # 合并配置：scorer 优先，缺失的从 profiler.ai 继承
                     merged_cfg = {
                         "enabled": scorer_cfg.get("enabled", False),
+                        "provider_id": scorer_cfg.get("provider_id")
+                        or profiler_ai_cfg.get("provider_id", ""),
                         "provider": scorer_cfg.get("provider")
-                        or profiler_ai_cfg.get("provider", "openai"),
-                        "api_key": scorer_cfg.get("api_key")
-                        or profiler_ai_cfg.get("api_key", ""),
-                        "base_url": scorer_cfg.get("base_url")
-                        or profiler_ai_cfg.get("base_url", ""),
+                        or profiler_ai_cfg.get("provider", "astrbot"),
                         "model": scorer_cfg.get("model")
                         or profiler_ai_cfg.get("model", ""),
                         "max_candidates": scorer_cfg.get("max_candidates", 50),
@@ -433,11 +505,21 @@ async def main_task(
                         "image_max_bytes": scorer_cfg.get("image_max_bytes", 2000000),
                         "proxy_url": network_cfg.get("proxy_url", ""),
                     }
-                    ai_scorer = AIScorer(merged_cfg)
+                    scorer_provider = _resolve_chat_provider(
+                        context,
+                        merged_cfg.get("provider_id", ""),
+                        purpose="ai.scorer",
+                    )
+                    ai_scorer = AIScorer(merged_cfg, provider=scorer_provider)
                 else:
                     scorer_cfg = dict(scorer_cfg)
                     scorer_cfg.setdefault("proxy_url", network_cfg.get("proxy_url", ""))
-                    ai_scorer = AIScorer(scorer_cfg)
+                    scorer_provider = _resolve_chat_provider(
+                        context,
+                        scorer_cfg.get("provider_id", ""),
+                        purpose="ai.scorer",
+                    )
+                    ai_scorer = AIScorer(scorer_cfg, provider=scorer_provider)
 
                 if ai_scorer.enabled:
                     logger.info(f"已启用 AI 精排评分 (model={ai_scorer.model})")
@@ -596,16 +678,29 @@ async def main_task(
     logger.info("=== 推送任务结束 ===")
 
 
-async def run_once(config: dict, notifiers_factory=None):
+async def run_once(
+    config: dict,
+    notifiers_factory=None,
+    context: Context | None = None,
+):
     """立即执行一次"""
     main_client, sync_client, profiler, notifiers = await setup_services(
-        config, notifiers_factory=notifiers_factory
+        config,
+        notifiers_factory=notifiers_factory,
+        context=context,
     )
 
     # Run-once 是 Fire-and-Forget 行为
 
     try:
-        await main_task(config, main_client, profiler, notifiers, sync_client)
+        await main_task(
+            config,
+            main_client,
+            profiler,
+            notifiers,
+            sync_client,
+            context=context,
+        )
     finally:
         await main_client.close()
         # 如果 sync_client 是独立实例，也需要关闭
@@ -752,17 +847,29 @@ async def daily_report_task(config: dict, notifiers: list, profiler=None):
 
 
 async def run_scheduler(
-    config: dict, run_immediately: bool = False, notifiers_factory=None
+    config: dict,
+    run_immediately: bool = False,
+    notifiers_factory=None,
+    context: Context | None = None,
 ):
     """启动调度器 (Daemon Mode)"""
     main_client, sync_client, profiler, notifiers = await setup_services(
-        config, notifiers_factory=notifiers_factory
+        config,
+        notifiers_factory=notifiers_factory,
+        context=context,
     )
 
     if run_immediately:
         logger.info("🚀 正在立即执行首次任务...")
         asyncio.create_task(
-            main_task(config, main_client, profiler, notifiers, sync_client)
+            main_task(
+                config,
+                main_client,
+                profiler,
+                notifiers,
+                sync_client,
+                context=context,
+            )
         )
 
     scheduler = AsyncIOScheduler()
@@ -815,7 +922,7 @@ async def run_scheduler(
             scheduler.add_job(
                 main_task,
                 CronTrigger.from_crontab(cron_expr),
-                args=[config, main_client, profiler, notifiers, sync_client],
+                args=[config, main_client, profiler, notifiers, sync_client, context],
                 id=f"push_job_{i}",
                 coalesce=coalesce,
                 misfire_grace_time=3600,
@@ -892,7 +999,11 @@ def _parse_ranking_config(ranking_cfg: dict) -> dict:
     modes_cfg = ranking_cfg.get("modes", {})
 
     # 新格式：{day: true, week: false, ...}
-    modes = [k for k, v in modes_cfg.items() if v] if modes_cfg else ["day", "week", "month"]
+    modes = (
+        [k for k, v in modes_cfg.items() if v]
+        if modes_cfg
+        else ["day", "week", "month"]
+    )
 
     return {"enabled": enabled, "modes": modes, "limit": limit}
 
@@ -910,7 +1021,11 @@ def _build_config_from_astrbot(plugin_cfg: AstrBotConfig) -> dict:
 
     # 解析 strategies 配置
     strategies_cfg = plugin_cfg.get("strategies", {})
-    strategies = [k for k, v in strategies_cfg.items() if v] if strategies_cfg else ["xp_search", "related", "ranking", "subscription"]
+    strategies = (
+        [k for k, v in strategies_cfg.items() if v]
+        if strategies_cfg
+        else ["xp_search", "related", "ranking", "subscription"]
+    )
 
     config = {
         "pixiv": {
@@ -922,9 +1037,8 @@ def _build_config_from_astrbot(plugin_cfg: AstrBotConfig) -> dict:
         "profiler": {
             "ai": {
                 "enabled": profiler_ai_cfg.get("enabled", False),
-                "provider": profiler_ai_cfg.get("provider", "openai"),
-                "api_key": profiler_ai_cfg.get("api_key", ""),
-                "base_url": profiler_ai_cfg.get("base_url", ""),
+                "provider_id": profiler_ai_cfg.get("provider_id", ""),
+                "provider": profiler_ai_cfg.get("provider", "astrbot"),
                 "model": profiler_ai_cfg.get("model", ""),
                 "concurrency": profiler_ai_cfg.get("concurrency", 10),
                 "batch_size": profiler_ai_cfg.get("batch_size", 200),
@@ -1080,7 +1194,9 @@ class AstrBotNotifier:
         try:
             session = await self._get_session()
             data = await download_image_with_referer(session, url, proxy=self.proxy_url)
-            return save_persistent_img(data, url=url, compression=self.image_compression)
+            return save_persistent_img(
+                data, url=url, compression=self.image_compression
+            )
         except Exception as e:
             logger.warning(
                 "下载图片失败：url=%s proxy=%s err=%s",
@@ -1436,6 +1552,7 @@ if Star is not None:
                     config,
                     run_immediately=immediate,
                     notifiers_factory=_notifier_factory,
+                    context=self.context,
                 )
             )
             task.add_done_callback(self._on_scheduler_done)
@@ -1497,7 +1614,11 @@ if Star is not None:
 
             async def _run():
                 async with self._run_once_lock:
-                    await run_once(config, notifiers_factory=_notifier_factory)
+                    await run_once(
+                        config,
+                        notifiers_factory=_notifier_factory,
+                        context=self.context,
+                    )
 
             asyncio.create_task(_run())
             return True, "Run-once task started."
@@ -1522,7 +1643,9 @@ if Star is not None:
                     sync_client = None
                     try:
                         main_client, sync_client, profiler, _ = await setup_services(
-                            config, notifiers_factory=_notifier_factory
+                            config,
+                            notifiers_factory=_notifier_factory,
+                            context=self.context,
                         )
                         profiler_cfg = config.get("profiler", {})
                         await profiler.build_profile(
@@ -1889,9 +2012,18 @@ if Star is not None:
                                         ]
                                     )
                                     result.buttons = [
-                                        ("👍 Like", f"cmd:/pixivxp feedback like {illust.id}"),
-                                        ("👎 Dislike", f"cmd:/pixivxp feedback dislike {illust.id}"),
-                                        ("⭐ 收藏", f"cmd:/pixivxp bookmark {illust.id}"),
+                                        (
+                                            "👍 Like",
+                                            f"cmd:/pixivxp feedback like {illust.id}",
+                                        ),
+                                        (
+                                            "👎 Dislike",
+                                            f"cmd:/pixivxp feedback dislike {illust.id}",
+                                        ),
+                                        (
+                                            "⭐ 收藏",
+                                            f"cmd:/pixivxp bookmark {illust.id}",
+                                        ),
                                     ]
                                     yield result
                                 else:

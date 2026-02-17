@@ -13,18 +13,12 @@ import re
 from collections import Counter, defaultdict
 from datetime import datetime
 
-try:
-    from openai import AsyncOpenAI
-
-    HAS_OPENAI = True
-except ImportError:
-    HAS_OPENAI = False
-
 import database as db
 from pixiv_client import Illust, PixivClient
 from utils import TAG_TRANSLATIONS, retry_async
 
 from astrbot.api import logger
+from astrbot.api.provider import Provider
 
 # 常见别名映射表（可扩展）
 TAG_ALIASES = {
@@ -53,9 +47,9 @@ TAG_ALIASES = {
 class AITagProcessor:
     """AI Tag 处理器 - 过滤无意义 tag 和归类同义 tag"""
 
-    def __init__(self, config: dict):
-        self._provider = None
-        self.enabled = config.get("enabled", False) and HAS_OPENAI
+    def __init__(self, config: dict, provider: Provider | None = None):
+        self._provider = provider
+        self.enabled = bool(config.get("enabled", False))
         self.filter_meaningless = config.get("filter_meaningless", True)
         self.merge_synonyms = config.get("merge_synonyms", True)
         self.model = config.get("model") or ""
@@ -63,18 +57,35 @@ class AITagProcessor:
         self.concurrency = config.get("concurrency", 3)  # 并发数
         self.pattern_users = re.compile(r"^(.*?)\d+users 入り$")  # 预编译正则
 
-        if self.enabled and not self.model:
-            logger.warning("未配置 Profiler AI model，功能已禁用")
-            self.enabled = False
+        if not self.enabled:
+            self._cache: dict[str, str | None] = {}
+            self._cache_initialized = False
+            self.occurred_errors: list[int] = []
+            return
 
-        self.base_url = config.get("base_url") or None
-        if self.enabled:
-            self.client = AsyncOpenAI(
-                api_key=config.get("api_key", ""),
-                base_url=self.base_url,
+        if self._provider is not None:
+            if not self.model:
+                try:
+                    self.model = (
+                        self._provider.get_model() or self._provider.meta().model or ""
+                    )
+                except Exception:
+                    self.model = ""
+            provider_id = "unknown"
+            try:
+                provider_id = self._provider.meta().id
+            except Exception:
+                pass
+            logger.info(
+                "Profiler AI tag processor enabled with AstrBot provider (provider_id=%s, model=%s)",
+                provider_id,
+                self.model or "default",
             )
         else:
-            self.client = None
+            logger.warning(
+                "Profiler AI enabled but no AstrBot chat provider available, disabling."
+            )
+            self.enabled = False
 
         # 缓存处理结果 (Tag -> CleanedTag/None)
         self._cache: dict[str, str | None] = {}
@@ -151,44 +162,19 @@ class AITagProcessor:
     @retry_async(max_retries=3, delay=2.0)
     async def _call_api(self, prompt: str) -> str:
         """调用 AI API（流式，防止超时）"""
-        if self._provider is not None:
-            try:
-                resp = await self._provider.text_chat(
-                    prompt=prompt,
-                    system_prompt="你是一个 Pixiv 插画标签数据处理专家，只输出标准 JSON。",
-                    model=self.model,
-                    temperature=0.1,
-                )
-                return resp.completion_text or ""
-            except Exception as e:
-                self._log_api_error(e, prompt=prompt, stream_started=False)
-                raise
-
-        stream_started = False
         try:
-            response = await self.client.chat.completions.create(
-                model=self.model,
-                messages=[
-                    {
-                        "role": "system",
-                        "content": "你是一个 Pixiv 插画标签数据处理专家，只输出标准 JSON。",
-                    },
-                    {"role": "user", "content": prompt},
-                ],
+            if self._provider is None:
+                raise RuntimeError("AstrBot chat provider is required")
+            resp = await self._provider.text_chat(
+                prompt=prompt,
+                system_prompt="你是一个 Pixiv 插画标签数据处理专家，只输出标准 JSON。",
+                model=self.model or None,
                 temperature=0.1,
-                response_format={"type": "json_object"},
-                stream=True,  # 启用流式
+                persist=False,
             )
-            stream_started = True
-
-            collected_content = []
-            async for chunk in response:
-                if chunk.choices and chunk.choices[0].delta.content:
-                    collected_content.append(chunk.choices[0].delta.content)
-
-            return "".join(collected_content)
+            return resp.completion_text or ""
         except Exception as e:
-            self._log_api_error(e, prompt=prompt, stream_started=stream_started)
+            self._log_api_error(e, prompt=prompt, stream_started=False)
             raise
 
     def _log_api_error(self, exc: Exception, prompt: str, stream_started: bool) -> None:
@@ -212,9 +198,8 @@ class AITagProcessor:
                 error_code = payload.get("code")
 
         fallback_type = exc.__class__.__name__
-        base_url = self.base_url or "default"
         logger.warning(
-            f"OpenAI 调用异常：status={status_code} request_id={request_id} model={self.model} base_url={base_url} "
+            f"Provider 调用异常：status={status_code} request_id={request_id} model={self.model} "
             f"stream_started={stream_started} prompt_len={len(prompt)} error_type={error_type or fallback_type} error_code={error_code} error_message={error_message or str(exc)} exc={str(exc)}"
         )
 
@@ -409,13 +394,14 @@ class XPProfiler:
         discovery_rate: float = 0.1,
         time_decay_days: int = 180,
         ai_config: dict | None = None,
+        ai_provider: Provider | None = None,
         saturation_threshold: float = 0.5,
     ):
         self.client = client
         self.stop_words = set(stop_words or [])
         self.discovery_rate = discovery_rate
         self.time_decay_days = time_decay_days
-        self.ai_processor = AITagProcessor(ai_config or {})
+        self.ai_processor = AITagProcessor(ai_config or {}, provider=ai_provider)
         self.saturation_threshold = saturation_threshold  # 高频 Tag 饱和度阈值
         self._blocked_artist_ids: set[int] = set()  # 初始化，由 load_blacklist 填充
 
