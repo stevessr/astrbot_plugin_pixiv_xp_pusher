@@ -20,7 +20,6 @@ class EmbeddingConfig:
 
     enabled: bool = False
     provider: str = "astrbot"
-    model: str = ""
     dimensions: int = 256
     cache_ttl_days: int = 30  # 缓存天数
     semantic_weight: float = 0.3  # 语义匹配在最终分数中的权重
@@ -49,6 +48,12 @@ class Embedder:
         except Exception:
             return ""
 
+    @property
+    def model(self) -> str:
+        if self._provider is None:
+            return ""
+        return self._provider_model(self._provider)
+
     def __init__(self, config: dict, provider: EmbeddingProvider | None = None):
         """
         初始化 Embedder
@@ -58,7 +63,6 @@ class Embedder:
         """
         self.enabled = config.get("enabled", False)
         self.provider = config.get("provider", "astrbot")
-        self.model = ""
         self.dimensions = config.get("dimensions", 256)
         self.semantic_weight = config.get("semantic_weight", 0.3)
         self.cache_ttl_days = config.get("cache_ttl_days", 30)
@@ -75,7 +79,7 @@ class Embedder:
             except Exception:
                 provider_id = "unknown"
 
-            self.model = self._provider_model(self._provider) or provider_id
+            model_name = self.model or provider_id
             try:
                 self.dimensions = int(self._provider.get_dim())
             except Exception:
@@ -84,7 +88,7 @@ class Embedder:
             logger.info(
                 "Embedder initialized with AstrBot provider (provider_id=%s, model=%s, dim=%s)",
                 provider_id,
-                self.model,
+                model_name,
                 self.dimensions,
             )
             return

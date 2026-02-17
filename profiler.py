@@ -60,12 +60,16 @@ class AITagProcessor:
         except Exception:
             return ""
 
+    def _current_model(self) -> str:
+        if self._provider is None:
+            return ""
+        return self._provider_model(self._provider)
+
     def __init__(self, config: dict, provider: Provider | None = None):
         self._provider = provider
         self.enabled = bool(config.get("enabled", False))
         self.filter_meaningless = config.get("filter_meaningless", True)
         self.merge_synonyms = config.get("merge_synonyms", True)
-        self.model = ""
         self.batch_size = config.get("batch_size", 50)
         self.concurrency = config.get("concurrency", 3)  # 并发数
         self.pattern_users = re.compile(r"^(.*?)\d+users 入り$")  # 预编译正则
@@ -77,7 +81,7 @@ class AITagProcessor:
             return
 
         if self._provider is not None:
-            self.model = self._provider_model(self._provider)
+            model_name = self._current_model()
             provider_id = "unknown"
             try:
                 provider_id = self._provider.meta().id
@@ -86,7 +90,7 @@ class AITagProcessor:
             logger.info(
                 "Profiler AI tag processor enabled with AstrBot provider (provider_id=%s, model=%s)",
                 provider_id,
-                self.model or "default",
+                model_name or "default",
             )
         else:
             logger.warning(
@@ -204,8 +208,9 @@ class AITagProcessor:
                 error_code = payload.get("code")
 
         fallback_type = exc.__class__.__name__
+        model_name = self._current_model()
         logger.warning(
-            f"Provider 调用异常：status={status_code} request_id={request_id} model={self.model} "
+            f"Provider 调用异常：status={status_code} request_id={request_id} model={model_name} "
             f"stream_started={stream_started} prompt_len={len(prompt)} error_type={error_type or fallback_type} error_code={error_code} error_message={error_message or str(exc)} exc={str(exc)}"
         )
 

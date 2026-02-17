@@ -28,7 +28,6 @@ class AIScoreConfig:
 
     enabled: bool = False
     provider: str = "astrbot"
-    model: str = ""
     max_candidates: int = 50  # 超过此数量时跳过 AI 评分
     score_weight: float = 0.3  # AI 分数在最终排序中的权重
     vision_enabled: bool = False
@@ -69,6 +68,15 @@ class AIScorer:
         except Exception:
             return ""
 
+    def _current_model(self) -> str:
+        if self._provider is None:
+            return ""
+        return self._provider_model(self._provider)
+
+    @property
+    def model(self) -> str:
+        return self._current_model()
+
     def __init__(self, config: dict, provider: Provider | None = None):
         """
         初始化 AI 评分器
@@ -78,7 +86,6 @@ class AIScorer:
         """
         self.enabled = config.get("enabled", False)
         self.provider = config.get("provider", "astrbot")
-        self.model = ""
         self.max_candidates = config.get("max_candidates", 50)
         self.score_weight = config.get("score_weight", 0.3)
         self.vision_enabled = bool(config.get("vision_enabled", False))
@@ -90,7 +97,7 @@ class AIScorer:
             return
 
         if self._provider is not None:
-            self.model = self._provider_model(self._provider)
+            model_name = self._current_model()
             provider_id = "unknown"
             try:
                 provider_id = self._provider.meta().id
@@ -99,7 +106,7 @@ class AIScorer:
             logger.info(
                 "AI Scorer initialized with AstrBot provider (provider_id=%s, model=%s)",
                 provider_id,
-                self.model or "default",
+                model_name or "default",
             )
             return
 
