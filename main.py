@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import os
 import random
 import re
@@ -333,15 +334,21 @@ async def setup_services(
         profiler_ai_cfg.get("provider_id", ""),
         purpose="profiler.ai",
     )
-    profiler = XPProfiler(
-        client=sync_client,  # 使用同步客户端获取收藏
-        stop_words=profiler_cfg.get("stop_words"),
-        discovery_rate=profiler_cfg.get("discovery_rate", 0.1),
-        time_decay_days=profiler_cfg.get("time_decay_days", 180),
-        ai_config=profiler_ai_cfg,
-        ai_provider=profiler_ai_provider,
-        saturation_threshold=profiler_cfg.get("saturation_threshold", 0.5),
-    )
+    profiler_kwargs = {
+        "client": sync_client,  # 使用同步客户端获取收藏
+        "stop_words": profiler_cfg.get("stop_words"),
+        "discovery_rate": profiler_cfg.get("discovery_rate", 0.1),
+        "time_decay_days": profiler_cfg.get("time_decay_days", 180),
+        "ai_config": profiler_ai_cfg,
+        "saturation_threshold": profiler_cfg.get("saturation_threshold", 0.5),
+    }
+    init_params = inspect.signature(XPProfiler.__init__).parameters
+    if "ai_provider" in init_params:
+        profiler_kwargs["ai_provider"] = profiler_ai_provider
+    elif "provider" in init_params:
+        profiler_kwargs["provider"] = profiler_ai_provider
+
+    profiler = XPProfiler(**profiler_kwargs)
 
     # Init Notifiers (使用 main_client 用于下载图片等，sync_client 用于 on_action 回调)
     if notifiers_factory:
