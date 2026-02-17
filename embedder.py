@@ -19,7 +19,6 @@ class EmbeddingConfig:
     """Embedding 配置"""
 
     enabled: bool = False
-    provider: str = "astrbot"
     dimensions: int = 256
     cache_ttl_days: int = 30  # 缓存天数
     semantic_weight: float = 0.3  # 语义匹配在最终分数中的权重
@@ -62,7 +61,6 @@ class Embedder:
             config: ai.embedding 配置块
         """
         self.enabled = config.get("enabled", False)
-        self.provider = config.get("provider", "astrbot")
         self.dimensions = config.get("dimensions", 256)
         self.semantic_weight = config.get("semantic_weight", 0.3)
         self.cache_ttl_days = config.get("cache_ttl_days", 30)
@@ -84,7 +82,6 @@ class Embedder:
                 self.dimensions = int(self._provider.get_dim())
             except Exception:
                 pass
-            self.provider = "astrbot"
             logger.info(
                 "Embedder initialized with AstrBot provider (provider_id=%s, model=%s, dim=%s)",
                 provider_id,
@@ -180,10 +177,9 @@ class Embedder:
                 lengths = [len(t) for t in texts]
                 sample = texts[0][:200] if texts else ""
                 logger.error(
-                    "批量 Embedding 失败：%s | provider=%s model=%s batch=%d "
+                    "批量 Embedding 失败：%s | backend=astrbot model=%s batch=%d "
                     "len(min/avg/max)=%s sample=%s",
                     e,
-                    self.provider,
                     self.model,
                     len(texts),
                     (

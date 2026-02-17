@@ -27,7 +27,6 @@ class AIScoreConfig:
     """AI 评分配置"""
 
     enabled: bool = False
-    provider: str = "astrbot"
     max_candidates: int = 50  # 超过此数量时跳过 AI 评分
     score_weight: float = 0.3  # AI 分数在最终排序中的权重
     vision_enabled: bool = False
@@ -85,7 +84,6 @@ class AIScorer:
             config: ai.scorer 配置块
         """
         self.enabled = config.get("enabled", False)
-        self.provider = config.get("provider", "astrbot")
         self.max_candidates = config.get("max_candidates", 50)
         self.score_weight = config.get("score_weight", 0.3)
         self.vision_enabled = bool(config.get("vision_enabled", False))

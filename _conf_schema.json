@@ -84,15 +84,6 @@
             },
             "default": ""
           },
-          "provider": {
-            "description": "Embedding 后端（固定使用 astrbot）",
-            "type": "string",
-            "condition": {
-              "enabled": true
-            },
-            "options": ["astrbot"],
-            "default": "astrbot"
-          },
           "dimensions": {
             "description": "向量维度",
             "type": "int",
@@ -136,15 +127,6 @@
               "ai.scorer.enabled": true
             },
             "default": ""
-          },
-          "provider": {
-            "description": "LLM 后端（固定使用 astrbot）",
-            "type": "string",
-            "condition": {
-              "ai.scorer.enabled": true
-            },
-            "options": ["astrbot"],
-            "default": "astrbot"
           },
           "max_candidates": {
             "description": "最大候选数量",
@@ -608,15 +590,6 @@
             "type": "string",
             "_special": "select_provider",
             "default": "",
-            "condition": {
-              "enabled": true
-            }
-          },
-          "provider": {
-            "description": "AI 后端（固定使用 astrbot）",
-            "type": "string",
-            "options": ["astrbot"],
-            "default": "astrbot",
             "condition": {
               "enabled": true
             }
