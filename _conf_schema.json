@@ -124,7 +124,7 @@
             "type": "string",
             "_special": "select_provider",
             "condition": {
-              "ai.scorer.enabled": true
+              "enabled": true
             },
             "default": ""
           },
