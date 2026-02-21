@@ -16,6 +16,23 @@
      - 模型跟随 Provider 当前配置，无需在插件中单独填写 model
 2. 启动插件：`/pixivxp start`
 
+### 获取 Pixiv refresh_token（新增脚本）
+
+插件目录提供了一个本地脚本：`get_pixiv_refresh_token.py`
+
+```bash
+# 在插件目录执行
+python get_pixiv_refresh_token.py --open-browser
+
+# 若需要代理
+python get_pixiv_refresh_token.py --proxy http://127.0.0.1:7890 --open-browser
+```
+
+按提示登录授权后，把回调 URL（或仅 code）粘贴回终端，脚本会输出 `refresh_token`。
+随后填入插件配置：
+- `pixiv.refresh_token`
+- `pixiv.user_id`（脚本返回中若带 user.id 可直接使用）
+
 ## 常用指令
 
 - `/pixivxp start` 启动调度
