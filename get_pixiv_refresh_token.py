@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import base64
 import hashlib
+import http.cookiejar
 import json
 import re
 import secrets
@@ -13,21 +14,18 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import webbrowser
+from datetime import datetime
 
 LOGIN_URL = "https://app-api.pixiv.net/web/v1/login"
 CALLBACK_URL = "https://app-api.pixiv.net/web/v1/users/auth/pixiv/callback"
 TOKEN_URL = "https://oauth.secure.pixiv.net/auth/token"
 
-# 与 pixivpy/pixiv 官方 App 流程一致的公开客户端参数
+# 与 pixivpy-async 当前实现保持一致
 CLIENT_ID = "MOBrBDS8blbauoSck0ZfDbtuzpyT"
-CLIENT_SECRET = "lsACyCD94FhDUtgtI1M6QzcFE2uU1Qk0"
+CLIENT_SECRET = "lsACyCD94FhDUtGTXi3QzcFE2uU1hqtDaKeqrdwj"
 
 REQUEST_HEADERS = {
     "User-Agent": "PixivAndroidApp/5.0.234 (Android 11; Pixel 5)",
-    "App-OS": "android",
-    "App-OS-Version": "11",
-    "App-Version": "5.0.234",
-    "Accept-Language": "zh-CN",
 }
 
 
@@ -51,6 +49,28 @@ def _build_login_url(code_challenge: str, state: str) -> str:
         }
     )
     return f"{LOGIN_URL}?{query}"
+
+
+def _extract_first_url(text: str) -> str:
+    for source in (text or "", urllib.parse.unquote(text or "")):
+        match = re.search(r"(?:https?|pixiv)://[^\s\"'<>]+", source)
+        if match:
+            return match.group(0)
+    return ""
+
+
+def _looks_like_callback_url(text: str) -> bool:
+    decoded = urllib.parse.unquote(text or "")
+    return CALLBACK_URL in decoded
+
+
+def _looks_like_app_callback_url(text: str) -> bool:
+    decoded = urllib.parse.unquote(text or "")
+    return decoded.startswith("pixiv://account/login")
+
+
+def _looks_like_valid_code_source_url(text: str) -> bool:
+    return _looks_like_callback_url(text) or _looks_like_app_callback_url(text)
 
 
 def _looks_like_intermediate_login_url(text: str) -> bool:
@@ -119,6 +139,23 @@ def _extract_code(user_input: str) -> str:
     raise ValueError("未找到 code 参数")
 
 
+def _build_opener(proxy: str, *, with_cookie: bool = False):
+    handlers = []
+    if proxy:
+        handlers.append(urllib.request.ProxyHandler({"http": proxy, "https": proxy}))
+    if with_cookie:
+        jar = http.cookiejar.CookieJar()
+        handlers.append(urllib.request.HTTPCookieProcessor(jar))
+    return urllib.request.build_opener(*handlers)
+
+
+def _client_time_and_hash() -> tuple[str, str]:
+    hash_secret = "28c1fdd170a5204386cb1313c7077b34f83e4aaf4aa829ce78c231e05b0bae2c"
+    local_time = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S+00:00")
+    client_hash = hashlib.md5((local_time + hash_secret).encode("utf-8")).hexdigest()
+    return local_time, client_hash
+
+
 def _request_token(
     code: str,
     code_verifier: str,
@@ -128,6 +165,7 @@ def _request_token(
 ) -> dict:
     payload = urllib.parse.urlencode(
         {
+            "get_secure_url": "1",
             "client_id": CLIENT_ID,
             "client_secret": CLIENT_SECRET,
             "code": code,
@@ -138,23 +176,67 @@ def _request_token(
         }
     ).encode("utf-8")
 
+    x_client_time, x_client_hash = _client_time_and_hash()
+    request_headers = {
+        **REQUEST_HEADERS,
+        "X-Client-Time": x_client_time,
+        "X-Client-Hash": x_client_hash,
+    }
+
     request = urllib.request.Request(
         TOKEN_URL,
         data=payload,
-        headers=REQUEST_HEADERS,
+        headers=request_headers,
         method="POST",
     )
 
-    if proxy:
-        opener = urllib.request.build_opener(
-            urllib.request.ProxyHandler({"http": proxy, "https": proxy})
-        )
-    else:
-        opener = urllib.request.build_opener()
+    opener = _build_opener(proxy)
 
     with opener.open(request, timeout=timeout) as response:
         response_text = response.read().decode("utf-8")
     return json.loads(response_text)
+
+
+def _follow_intermediate_redirect_and_extract_code(
+    url: str,
+    *,
+    timeout: int,
+    proxy: str,
+) -> tuple[str, str]:
+    """尝试对中间跳转 URL 发起请求并提取最终 code。
+
+    Returns:
+        (code, source_url)
+    """
+    opener = _build_opener(proxy, with_cookie=True)
+    req = urllib.request.Request(url, headers=REQUEST_HEADERS, method="GET")
+
+    with opener.open(req, timeout=timeout) as resp:
+        final_url = resp.geturl() or ""
+        if final_url and _looks_like_valid_code_source_url(final_url):
+            return _extract_code(final_url), final_url
+
+        body = resp.read().decode("utf-8", errors="ignore")
+
+    # 从 HTML 中兜底提取 callback URL / app callback URL
+    candidates = []
+    for pat in [
+        r'(?:https?|pixiv)://[^"\'\s>]+',
+        r'return_to=([^"\'\s>]+)',
+        r'content="\d+;\s*url=([^"\']+)"',
+    ]:
+        for m in re.findall(pat, body):
+            text = urllib.parse.unquote(m)
+            if _looks_like_valid_code_source_url(text):
+                candidates.append(text)
+
+    for c in candidates:
+        try:
+            return _extract_code(c), c
+        except ValueError:
+            continue
+
+    raise ValueError("自动跟随跳转后未到达可用回调页面")
 
 
 def main() -> int:
@@ -199,15 +281,34 @@ def main() -> int:
 
     user_input = input("请输入回调 URL 或 code: ").strip()
 
+    normalized_input = _extract_first_url(user_input) or user_input
+    code_source_url = normalized_input
+
     try:
-        code = _extract_code(user_input)
+        code = _extract_code(normalized_input)
     except ValueError as exc:
         print(f"\n解析失败：{exc}")
-        if _looks_like_intermediate_login_url(user_input):
-            print(
-                "你粘贴的是登录中间跳转 URL（start/post-redirect），不是最终回调。\n"
-                "请在浏览器里继续完成登录后，复制包含 code=... 的最终 URL。"
-            )
+        if _looks_like_intermediate_login_url(normalized_input):
+            print("检测到中间跳转 URL，尝试自动跟随请求并提取 code...")
+            try:
+                code, code_source_url = _follow_intermediate_redirect_and_extract_code(
+                    normalized_input,
+                    timeout=max(1, args.timeout),
+                    proxy=args.proxy.strip(),
+                )
+                print("自动提取 code 成功。")
+            except Exception as follow_exc:
+                print(f"自动跟随失败：{follow_exc}")
+                print(
+                    "请在浏览器里继续完成登录后，复制包含 code=... 的最终 callback URL。"
+                )
+                return 1
+        else:
+            return 1
+
+    if not _looks_like_valid_code_source_url(code_source_url):
+        print("\n提取到的 code 来源不是可用回调 URL，已拒绝使用，避免 code_verifier 不匹配。")
+        print("请在浏览器里继续完成登录，复制包含 code=... 的最终回调 URL。")
         return 1
 
     try:
